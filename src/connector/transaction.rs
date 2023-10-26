@@ -34,7 +34,7 @@ use crate::bson_ext::teon_value_to_bson;
 use crate::migration::index_model::FromIndexModel;
 
 #[derive(Debug, Clone)]
-pub(crate) struct MongoDBTransaction {
+pub struct MongoDBTransaction {
     pub(super) database: Database,
 }
 

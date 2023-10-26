@@ -1,2 +1,5 @@
-pub(crate) mod connection;
-pub(crate) mod transaction;
+pub mod connection;
+pub mod transaction;
+
+pub use connection::MongoDBConnection;
+pub use transaction::MongoDBTransaction;

@@ -15,7 +15,7 @@ pub struct MongoDBConnection {
 
 impl MongoDBConnection {
 
-    pub(crate) async fn new(url: String) -> Self {
+    pub async fn new(url: &str) -> Self {
         let options = match ClientOptions::parse(url).await {
             Ok(options) => options,
             Err(_) => panic!("MongoDB url is invalid.")

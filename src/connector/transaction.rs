@@ -316,7 +316,7 @@ impl MongoDBTransaction {
 
 #[async_trait]
 impl Transaction for MongoDBTransaction {
-    async fn migrate(&self, models: Vec<&Model>, reset_database: bool) -> Result<()> {
+    async fn migrate(&self, models: Vec<&Model>, dry_run: bool, reset_database: bool, silent: bool) -> Result<()> {
         if reset_database {
             let _ = self.database.drop(None).await;
         }

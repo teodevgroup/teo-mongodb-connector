@@ -3,6 +3,8 @@ use async_trait::async_trait;
 use bson::doc;
 use mongodb::{Client, Database};
 use mongodb::options::ClientOptions;
+use teo_runtime::connection::connection::Connection;
+use teo_runtime::connection::transaction::Transaction;
 use crate::connector::transaction::MongoDBTransaction;
 
 
@@ -11,7 +13,8 @@ pub struct MongoDBConnection {
     database: Database,
 }
 
-impl MongoDBTransaction {
+impl MongoDBConnection {
+
     pub(crate) async fn new(url: String) -> Self {
         let options = match ClientOptions::parse(url).await {
             Ok(options) => options,
@@ -37,8 +40,15 @@ impl MongoDBTransaction {
 }
 
 #[async_trait]
-impl Connection for MongoDBTransaction {
-    async fn connection(&self) -> crate::prelude::Result<Arc<dyn Connection>> {
+impl Connection for MongoDBConnection {
+
+    async fn transaction(&self) -> teo_result::Result<Arc<dyn Transaction>> {
+        Ok(Arc::new(MongoDBTransaction {
+            database: self.database.clone()
+        }))
+    }
+
+    async fn no_transaction(&self) -> teo_result::Result<Arc<dyn Transaction>> {
         Ok(Arc::new(MongoDBTransaction {
             database: self.database.clone()
         }))

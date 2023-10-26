@@ -1,27 +1,25 @@
 use bson::Bson;
 use bson::datetime::{DateTime as BsonDateTime};
 use chrono::{NaiveDateTime, NaiveTime, TimeZone, Utc};
-use crate::prelude::Value;
+use teo_teon::Value;
 
 pub(crate) mod coder;
 
 pub(crate) fn teon_value_to_bson(value: &Value) -> Bson {
     match value {
         Value::Null => Bson::Null,
-        Value::ObjectId(oid) => Bson::ObjectId(oid),
-        Value::Bool(b) => Bson::Boolean(b),
-        Value::I32(i) => Bson::Int32(i),
-        Value::I64(i) => Bson::Int64(i),
-        Value::F32(f) => Bson::Double(f as f64),
-        Value::F64(f) => Bson::Double(f as f64),
+        Value::ObjectId(oid) => Bson::ObjectId(oid.clone()),
+        Value::Bool(b) => Bson::Boolean(*b),
+        Value::Int(i) => Bson::Int32(*i),
+        Value::Int64(i) => Bson::Int64(*i),
+        Value::Float32(f) => Bson::Double(*f as f64),
+        Value::Float(f) => Bson::Double(*f),
         Value::Decimal(_d) => panic!("Decimal is not implemented by MongoDB."),
-        Value::String(s) => Bson::String(s),
-        Value::Date(val) => Bson::DateTime(BsonDateTime::from(Utc.from_utc_datetime(&NaiveDateTime::new(val, NaiveTime::default())))),
+        Value::String(s) => Bson::String(s.clone()),
+        Value::Date(val) => Bson::DateTime(BsonDateTime::from(Utc.from_utc_datetime(&NaiveDateTime::new(val.clone(), NaiveTime::default())))),
         Value::DateTime(val) => Bson::DateTime(BsonDateTime::from(val)),
-        Value::Vec(val) => Bson::Array(val.iter().map(|i| { i.into() }).collect()),
-        Value::HashMap(val) => Bson::Document(val.iter().map(|(k, v)| (k.clone(), v.into())).collect()),
-        Value::BTreeMap(val) => Bson::Document(val.iter().map(|(k, v)| (k.clone(), v.into())).collect()),
-        Value::IndexMap(val) => Bson::Document(val.iter().map(|(k, v)| (k.clone(), v.into())).collect()),
+        Value::Array(val) => Bson::Array(val.iter().map(|i| { i.into() }).collect()),
+        Value::Dictionary(val) => Bson::Document(val.iter().map(|(k, v)| (k.clone(), v.into())).collect()),
         _ => panic!("Cannot convert to bson.")
     }
 }

@@ -10,6 +10,7 @@ use teo_result::{Error, Result};
 use teo_runtime::model::field::column_named::ColumnNamed;
 use teo_runtime::model::field::is_optional::IsOptional;
 use teo_runtime::model::field::named::Named;
+use teo_runtime::model::field::typed::Typed;
 use teo_runtime::namespace::Namespace;
 
 pub(crate) struct Aggregation { }
@@ -71,7 +72,7 @@ impl Aggregation {
         }
         let mut group = if let Some(by) = by {
             let mut id_for_group_by = doc!{};
-            for key in by.as_vec().unwrap() {
+            for key in by.as_array().unwrap() {
                 let k = key.as_str().unwrap();
                 let dbk = model.field(k).unwrap().column_name();
                 id_for_group_by.insert(dbk, doc!{
@@ -85,7 +86,7 @@ impl Aggregation {
         let mut set = doc!{};
         let mut unset: Vec<String> = vec![];
         if let Some(by) = by {
-            for key in by.as_vec().unwrap() {
+            for key in by.as_array().unwrap() {
                 let k = key.as_str().unwrap();
                 let dbk = model.field(k).unwrap().column_name();
                 set.insert(k, format!("$_id.{dbk}"));
@@ -133,7 +134,7 @@ impl Aggregation {
         let mut group_by_sort = doc!{};
         if let Some(by) = by {
             // we need to order these
-            for key in by.as_vec().unwrap() {
+            for key in by.as_array().unwrap() {
                 let k = key.as_str().unwrap();
                 group_by_sort.insert(k, 1);
             }
@@ -166,10 +167,10 @@ impl Aggregation {
             let cursor = cursor.as_dictionary().unwrap();
             let cursor_key = cursor.keys().next().unwrap();
             let cursor_value = cursor.values().next().unwrap();
-            let order_by = value.get("orderBy").unwrap().as_vec().unwrap().get(0).unwrap().as_dictionary().unwrap().values().next().unwrap().as_str().unwrap();
+            let order_by = value.get("orderBy").unwrap().as_array().unwrap().get(0).unwrap().as_dictionary().unwrap().values().next().unwrap().as_str().unwrap();
             let mut order_asc = order_by == "asc";
             if let Some(take) = take {
-                if take.as_i64().unwrap() < 0 {
+                if take.as_int64().unwrap() < 0 {
                     order_asc = !order_asc;
                 }
             }
@@ -214,7 +215,7 @@ impl Aggregation {
         if distinct.is_none() {
             if let Some(order_by) = order_by {
                 let reverse = match take {
-                    Some(take) => take.as_i64().unwrap() < 0,
+                    Some(take) => take.as_int64().unwrap() < 0,
                     None => false
                 };
                 let sort = Self::build_order_by(model, order_by, reverse)?;
@@ -222,7 +223,7 @@ impl Aggregation {
                     retval.push(doc!{"$sort": sort});
                 }
             } else if let Some(take) = take {
-                if take.as_i64().unwrap() < 0 {
+                if take.as_int64().unwrap() < 0 {
                     let sort = Self::build_order_by(model, &Self::default_desc_order(model), false)?;
                     retval.push(doc!{"$sort": sort});
                 }
@@ -230,14 +231,14 @@ impl Aggregation {
         }
         // $skip and $limit
         if page_size.is_some() && page_number.is_some() {
-            retval.push(doc!{"$skip": ((page_number.unwrap().as_i64().unwrap() - 1) * page_size.unwrap().as_i64().unwrap()) as i64});
-            retval.push(doc!{"$limit": page_size.unwrap().as_i64().unwrap()});
+            retval.push(doc!{"$skip": ((page_number.unwrap().to_int64().unwrap() - 1) * page_size.unwrap().to_int64().unwrap()) as i64});
+            retval.push(doc!{"$limit": page_size.unwrap().to_int64().unwrap()});
         } else {
             if skip.is_some() {
-                retval.push(doc!{"$skip": skip.unwrap().as_i64().unwrap()});
+                retval.push(doc!{"$skip": skip.unwrap().to_int64().unwrap()});
             }
             if take.is_some() {
-                retval.push(doc!{"$limit": take.unwrap().as_i64().unwrap().abs()});
+                retval.push(doc!{"$limit": take.unwrap().to_int64().unwrap().abs()});
             }
         }
         // distinct or select
@@ -245,7 +246,7 @@ impl Aggregation {
         if let Some(distinct) = distinct {
             // $group
             let mut group_id = doc!{};
-            for value in distinct.as_vec().unwrap().iter() {
+            for value in distinct.as_array().unwrap().iter() {
                 let val = value.as_str().unwrap();
                 group_id.insert(val, format!("${val}"));
             }
@@ -261,7 +262,7 @@ impl Aggregation {
             }
             // $sort again if distinct
             let reverse = match take {
-                Some(take) => take.as_i64().unwrap() < 0,
+                Some(take) => take.to_int64().unwrap() < 0,
                 None => false
             };
             if let Some(order_by) = order_by {
@@ -295,11 +296,11 @@ impl Aggregation {
         let map = select.as_dictionary().unwrap();
         let true_keys: Vec<&str> = map.iter().filter(|(_k, v)| v.as_bool().unwrap() == true).map(|(k, _)| k.as_str()).collect();
         let false_keys: Vec<&str> = map.iter().filter(|(_k, v)| v.as_bool().unwrap() == false).map(|(k, _)| k.as_str()).collect();
-        let primary_field_names = model.primary_index().keys();
+        let primary_field_names = model.primary_index().unwrap().keys();
         let mut keys: HashSet<String> = HashSet::new();
         let save_unmentioned_keys = true_keys.is_empty();
-        model.all_keys().iter().for_each(|k| {
-            let save = primary_field_names.contains(k) || (!false_keys.contains(k) && (true_keys.contains(&k) || save_unmentioned_keys));
+        model.cache.all_keys.iter().for_each(|k| {
+            let save = primary_field_names.contains(k) || (!false_keys.contains(&k.as_str()) && (true_keys.contains(&k.as_str()) || save_unmentioned_keys));
             if save {
                 if let Some(field) = model.field(k) {
                     let column_name = field.column_name();
@@ -328,7 +329,7 @@ impl Aggregation {
 
     fn build_order_by(model: &Model, order_by: &Value, reverse: bool) -> Result<Document> {
         let mut retval = doc!{};
-        for sort in order_by.as_vec().unwrap().iter() {
+        for sort in order_by.as_array().unwrap().iter() {
             let (key, value) = Input::key_value(sort.as_dictionary().unwrap());
             let key = model.field(key).unwrap().column_name();
             if value.is_string() {
@@ -351,14 +352,14 @@ impl Aggregation {
             match key {
                 "AND" => {
                     let mut vals: Vec<Document> = vec![];
-                    for val in value.as_vec().unwrap() {
+                    for val in value.as_array().unwrap() {
                         vals.push(Self::build_where(namespace, model, val)?);
                     }
                     retval.insert("$and", vals);
                 }
                 "OR" => {
                     let mut vals: Vec<Document> = vec![];
-                    for val in value.as_vec().unwrap() {
+                    for val in value.as_array().unwrap() {
                         vals.push(Self::build_where(namespace, model, val)?);
                     }
                     retval.insert("$or", vals);
@@ -480,7 +481,7 @@ impl Aggregation {
         let join_model = namespace.model_at_path(&relation.through_path().unwrap()).unwrap();
         let local_relation_on_join_table = join_model.relation(relation.local().unwrap()).unwrap();
         let foreign_relation_on_join_table = join_model.relation(relation.foreign().unwrap()).unwrap();
-        let _foreign_model_name = foreign_relation_on_join_table.model();
+        let _foreign_model_name = foreign_relation_on_join_table.model_path();
         let (opposite_model, _opposite_relation) = namespace.opposite_relation(relation);
         let mut outer_let_value = doc! {};
         let mut outer_eq_values: Vec<Document> = vec![];
@@ -758,8 +759,8 @@ impl Aggregation {
 
     fn default_desc_order(model: &Model) -> Value {
         let mut vec: Vec<Value> = vec![];
-        for item in model.primary_index().items() {
-            vec.push(Value::Dictionary(indexmap!{item.field_name().to_string() => Value::String("desc".to_string())}));
+        for item in &model.primary_index().unwrap().items {
+            vec.push(Value::Dictionary(indexmap!{item.field.clone() => Value::String("desc".to_string())}));
         }
         Value::Array(vec)
     }

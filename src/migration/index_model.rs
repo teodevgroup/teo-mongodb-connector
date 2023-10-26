@@ -4,11 +4,11 @@ use teo_runtime::model::{Index, index::Item};
 use teo_runtime::index::Type;
 
 pub trait FromIndexModel {
-    fn from(index_model: &IndexModel) -> Self;
+    fn from_index_model(index_model: &IndexModel) -> Self;
 }
 
 impl FromIndexModel for Index {
-    fn from(index_model: &IndexModel) -> Self {
+    fn from_index_model(index_model: &IndexModel) -> Self {
         let unique_result = index_model.options.as_ref().unwrap().unique;
         let unique = match unique_result {
             Some(bool) => bool,

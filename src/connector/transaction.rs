@@ -28,8 +28,10 @@ use teo_runtime::sort::Sort;
 use teo_runtime::model::object::input::Input;
 use teo_runtime::namespace::Namespace;
 use teo_runtime::object::error_ext;
+use teo_runtime::utils::ContainsStr;
 use teo_teon::teon;
 use crate::bson_ext::teon_value_to_bson;
+use crate::migration::index_model::FromIndexModel;
 
 #[derive(Debug, Clone)]
 pub(crate) struct MongoDBTransaction {
@@ -42,7 +44,7 @@ impl MongoDBTransaction {
         self.database.collection(model.table_name())
     }
 
-    fn document_to_object(&self, transaction_ctx: transaction::Ctx, document: &Document, object: &Object, select: Option<&Value>, include: Option<&Value>) -> Result<()> {
+    fn document_to_object(&self, transaction_ctx: transaction::Ctx, document: &Document, object: &Object, select: Option<&Value>, include: Option<&Value>) -> teo_runtime::path::Result<()> {
         for key in document.keys() {
             let object_field = object.model().fields().iter().find(|f| f.column_name() == key);
             if object_field.is_some() {
@@ -51,7 +53,7 @@ impl MongoDBTransaction {
                 let object_key = &object_field.name;
                 let r#type = object_field.r#type();
                 let bson_value = document.get(key).unwrap();
-                let value_result = BsonCoder::decode(object.model(), r#type, object_field.is_optional(), bson_value, path![]);
+                let value_result = BsonCoder::decode(transaction_ctx.namespace(), object.model(), r#type, object_field.is_optional(), bson_value, path![]);
                 match value_result {
                     Ok(value) => {
                         object.set_value(object_key, value).unwrap();
@@ -176,7 +178,8 @@ impl MongoDBTransaction {
         Ok(final_retval)
     }
 
-    async fn create_object(&self, object: &Object) -> teo_runtime::path::Result<()> {
+    async fn create_object(&self, object: &Object, path: KeyPath) -> teo_runtime::path::Result<()> {
+        let namespace = object.namespace();
         let model = object.model();
         let keys = object.keys_for_save();
         let col = self.get_collection(model);
@@ -204,23 +207,24 @@ impl MongoDBTransaction {
                 for key in auto_keys {
                     let field = model.field(key).unwrap();
                     if field.column_name() == "_id" {
-                        let new_value = BsonCoder::decode(model, field.r#type(), field.is_optional(), &id, path![]).unwrap();
+                        let new_value = BsonCoder::decode(namespace, model, field.r#type(), field.is_optional(), &id, path![]).unwrap();
                         object.set_value(field.name(), new_value)?;
                     }
                 }
             }
             Err(error) => {
-                return Err(self._handle_write_error(&error.kind, object));
+                return Err(self._handle_write_error(&error.kind, object, path));
             }
         }
         Ok(())
     }
 
-    async fn update_object(&self, object: &Object) -> teo_runtime::path::Result<()> {
+    async fn update_object(&self, object: &Object, path: KeyPath) -> teo_runtime::path::Result<()> {
+        let namespace = object.namespace();
         let model = object.model();
         let keys = object.keys_for_save();
         let col = self.get_collection(model);
-        let identifier: Bson = teon_value_to_bson(object.db_identifier());
+        let identifier: Bson = teon_value_to_bson(&object.db_identifier());
         let identifier = identifier.as_document().unwrap();
         let mut set = doc!{};
         let mut unset = doc!{};
@@ -285,7 +289,7 @@ impl MongoDBTransaction {
             return match result {
                 Ok(_) => Ok(()),
                 Err(error) => {
-                    Err(self._handle_write_error(&error.kind, object))
+                    Err(self._handle_write_error(&error.kind, object, path))
                 }
             }
         } else {
@@ -293,15 +297,15 @@ impl MongoDBTransaction {
             let result = col.find_one_and_update(identifier.clone(), update_doc, options).await;
             match result {
                 Ok(updated_document) => {
-                    for key in object.inner.atomic_updater_map.lock().unwrap().keys() {
+                    for (key, value) in object.inner.atomic_updater_map.lock().unwrap().iter() {
                         let bson_new_val = updated_document.as_ref().unwrap().get(key).unwrap();
                         let field = object.model().field(key).unwrap();
-                        let field_value = BsonCoder::decode(model, field.r#type(), field.is_optional(), bson_new_val, path![])?;
+                        let field_value = BsonCoder::decode(namespace, model, field.r#type(), field.is_optional(), bson_new_val, path![])?;
                         object.set_value(key, field_value).unwrap();
                     }
                 }
                 Err(error) => {
-                    return Err(self._handle_write_error(&error.kind, object));
+                    return Err(self._handle_write_error(&error.kind, object, path));
                 }
             }
         }
@@ -328,29 +332,29 @@ impl Transaction for MongoDBTransaction {
                         continue
                     }
                     let name = (&index).options.as_ref().unwrap().name.as_ref().unwrap();
-                    let result = model.indexes().iter().find(|i| &i.mongodb_name() == name);
+                    let result = model.indexes().iter().find(|i| name == i.name()).map(|i| *i);
                     if result.is_none() {
                         // not in our model definition, but in the database
                         // drop this index
                         let _ = collection.drop_index(name, None).await.unwrap();
                     } else {
-                        let result = result.unwrap().as_ref();
-                        let our_format_index: Index = (&index).into();
+                        let result = result.unwrap();
+                        let our_format_index: Index = Index::from_index_model(&index);
                         if result != &our_format_index {
                             // alter this index
                             // drop first
                             let _ = collection.drop_index(name, None).await.unwrap();
                             // create index
                             let index_options = IndexOptions::builder()
-                                .name(result.mongodb_name())
+                                .name(result.name().to_string())
                                 .unique(result.r#type() == Type::Unique || result.r#type() == Type::Primary)
                                 .sparse(true)
                                 .build();
                             let mut keys = doc!{};
                             for item in result.items() {
-                                let field = model.field(item.field_name()).unwrap();
+                                let field = model.field(&item.field).unwrap();
                                 let column_name = field.column_name();
-                                keys.insert(column_name, if item.sort() == Sort::Asc { 1 } else { -1 });
+                                keys.insert(column_name, if item.sort == Sort::Asc { 1 } else { -1 });
                             }
                             let index_model = IndexModel::builder().keys(keys).options(index_options).build();
                             let _result = collection.create_index(index_model, None).await;
@@ -360,7 +364,7 @@ impl Transaction for MongoDBTransaction {
                 }
             }
             for index in model.indexes() {
-                if !reviewed_names.contains(&index.mongodb_name()) {
+                if !reviewed_names.contains_str(index.name()) {
                     // ignore primary
                     if index.keys().len() == 1 {
                         let field = model.field(index.keys().get(0).unwrap()).unwrap();
@@ -370,15 +374,15 @@ impl Transaction for MongoDBTransaction {
                     }
                     // create this index
                     let index_options = IndexOptions::builder()
-                        .name(index.mongodb_name())
+                        .name(index.name().to_string())
                         .unique(index.r#type() == Type::Unique || index.r#type() == Type::Primary)
                         .sparse(true)
                         .build();
                     let mut keys = doc!{};
                     for item in index.items() {
-                        let field = model.field(item.field_name()).unwrap();
+                        let field = model.field(&item.field).unwrap();
                         let column_name = field.column_name();
-                        keys.insert(column_name, if item.sort() == Sort::Asc { 1 } else { -1 });
+                        keys.insert(column_name, if item.sort == Sort::Asc { 1 } else { -1 });
                     }
                     let index_model = IndexModel::builder().keys(keys).options(index_options).build();
                     let result = collection.create_index(index_model, None).await;
@@ -405,9 +409,9 @@ impl Transaction for MongoDBTransaction {
 
     async fn save_object(&self, object: &Object, path: KeyPath) -> teo_runtime::path::Result<()> {
         if object.is_new() {
-            self.create_object(object).await
+            self.create_object(object, path).await
         } else {
-            self.update_object(object).await
+            self.update_object(object, path).await
         }
     }
 
@@ -460,8 +464,7 @@ impl Transaction for MongoDBTransaction {
         // println!("see aggregate input: {:?}", aggregate_input);
         let cur = col.aggregate(aggregate_input, None).await;
         if cur.is_err() {
-            println!("{:?}", cur);
-            return Err(Error::unknown_database_find_error());
+            return Err(error_ext::unknown_database_find_error(path, format!("{:?}", cur)));
         }
         let cur = cur.unwrap();
         let mut result: Vec<Object> = vec![];
@@ -489,8 +492,7 @@ impl Transaction for MongoDBTransaction {
         let col = self.get_collection(model);
         let cur = col.aggregate(input, None).await;
         if cur.is_err() {
-            println!("{:?}", cur);
-            return Err(Error::unknown_database_find_error());
+            return Err(error_ext::unknown_database_find_error(path, format!("{:?}", cur)));
         }
         let cur = cur.unwrap();
         let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;

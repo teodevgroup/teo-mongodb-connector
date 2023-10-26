@@ -10,8 +10,8 @@ teo-result = "0.0.58-alpha.2"
 teo-teon = { path = "../teo-teon" }
 teo-parser = { path = "../teo-parser" }
 teo-runtime = { path = "../teo-runtime" }
-mongodb = { version = "2.7.0", optional = true }
-bson = { version = "2.7.0", features = ["chrono-0_4", "serde_with"], optional = true }
+bson = { version = "2.7.0", features = ["chrono-0_4", "serde_with"] }
+mongodb = { version = "2.7.0" }
 async-recursion = "1.0.5"
 async-trait = "0.1.74"
 maplit = "1.0.2"
@@ -23,4 +23,4 @@ itertools = "0.11.0"
 regex = "1.10.2"
 snailquote = "0.3.1"
 key-path = "0.2.0"
-futures-util = "0.3.29"
+futures-util = "0.3"

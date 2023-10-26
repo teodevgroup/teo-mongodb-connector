@@ -20,6 +20,6 @@ pub(crate) fn teon_value_to_bson(value: &Value) -> Bson {
         Value::DateTime(val) => Bson::DateTime(BsonDateTime::from(val)),
         Value::Array(val) => Bson::Array(val.iter().map(|i| { i.into() }).collect()),
         Value::Dictionary(val) => Bson::Document(val.iter().map(|(k, v)| (k.clone(), v.into())).collect()),
-        _ => panic!("Cannot convert to bson.")
+        _ => panic!("Cannot convert to bson_ext.")
     }
 }

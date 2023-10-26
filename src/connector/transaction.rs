@@ -5,23 +5,28 @@ use std::sync::atomic::{Ordering};
 use async_trait::async_trait;
 use bson::{Bson, doc, Document};
 use futures_util::StreamExt;
-use key_path::path;
+use key_path::{KeyPath, path};
 use mongodb::{Database, Collection, IndexModel};
 use mongodb::error::{ErrorKind, WriteFailure, Error as MongoDBError};
 use mongodb::options::{FindOneAndUpdateOptions, IndexOptions, ReturnDocument};
 use regex::Regex;
 use crate::aggregation::Aggregation;
-use crate::bson::coder::BsonCoder;
+use crate::bson_ext::coder::BsonCoder;
 use teo_runtime::action::*;
 use teo_runtime::model::object::Object;
 use teo_runtime::index::Type;
 use teo_runtime::model::{Index, Model};
 use teo_teon::value::Value;
 use teo_result::{Error, Result};
+use teo_runtime::connection::transaction::{Ctx, Transaction};
+use teo_runtime::model::field::column_named::ColumnNamed;
+use teo_runtime::model::field::named::Named;
 use teo_runtime::sort::Sort;
 use teo_runtime::model::object::input::Input;
+use teo_runtime::namespace::Namespace;
+use teo_runtime::object::error_ext;
 use teo_teon::teon;
-use crate::bson::teon_value_to_bson;
+use crate::bson_ext::teon_value_to_bson;
 
 #[derive(Debug, Clone)]
 pub(crate) struct MongoDBTransaction {
@@ -46,7 +51,7 @@ impl MongoDBTransaction {
                 let value_result = BsonCoder::decode(object.model(), field_type, object_field.is_optional(), bson_value, path![]);
                 match value_result {
                     Ok(value) => {
-                        object.inner.value_map.lock().unwrap().insert(object_key.to_string(), value);
+                        object.set_value(object_key, value).unwrap();
                     }
                     Err(err) => {
                         return Err(err);
@@ -78,7 +83,7 @@ impl MongoDBTransaction {
                 let object_bsons = document.get(key).unwrap().as_array().unwrap();
                 let mut related: Vec<Object> = vec![];
                 for related_object_bson in object_bsons {
-                    let action = Action::from_u32(NESTED | FIND | (if relation.is_vec() { MANY } else { SINGLE }));
+                    let action = NESTED | FIND | (if relation.is_vec { MANY } else { SINGLE });
                     let related_object = object.graph().new_object(model_name, action, object.action_source().clone(), Arc::new(self.clone()))?;
                     self.clone().document_to_object(related_object_bson.as_document().unwrap(), &related_object, inner_select, inner_include)?;
                     related.push(related_object);
@@ -120,8 +125,8 @@ impl MongoDBTransaction {
         }
     }
 
-    async fn aggregate_or_group_by(&self, model: &Model, finder: &Value) -> Result<Vec<Value>> {
-        let aggregate_input = Aggregation::build_for_aggregate(model, finder)?;
+    async fn aggregate_or_group_by(&self, namespace: &Namespace, model: &Model, finder: &Value) -> Result<Vec<Value>> {
+        let aggregate_input = Aggregation::build_for_aggregate(namespace, model, finder)?;
         let col = self.get_collection(model);
         let cur = col.aggregate(aggregate_input, None).await;
         if cur.is_err() {
@@ -169,7 +174,7 @@ impl MongoDBTransaction {
         Ok(final_retval)
     }
 
-    async fn create_object(&self, object: &Object) -> Result<()> {
+    async fn create_object(&self, object: &Object) -> teo_runtime::path::Result<()> {
         let model = object.model();
         let keys = object.keys_for_save();
         let col = self.get_collection(model);
@@ -209,7 +214,7 @@ impl MongoDBTransaction {
         Ok(())
     }
 
-    async fn update_object(&self, object: &Object) -> Result<()> {
+    async fn update_object(&self, object: &Object) -> teo_runtime::path::Result<()> {
         let model = object.model();
         let keys = object.keys_for_save();
         let col = self.get_collection(model);
@@ -304,9 +309,8 @@ impl MongoDBTransaction {
 }
 
 #[async_trait]
-impl Connection for MongoDBTransaction {
-
-    async fn migrate(self: Arc<Self>, models: Vec<&Model>, reset_database: bool) -> Result<()> {
+impl Transaction for MongoDBTransaction {
+    async fn migrate(&self, models: Vec<&Model>, reset_database: bool) -> Result<()> {
         if reset_database {
             let _ = self.database.drop(None).await;
         }
@@ -329,7 +333,7 @@ impl Connection for MongoDBTransaction {
                         let _ = collection.drop_index(name, None).await.unwrap();
                     } else {
                         let result = result.unwrap().as_ref();
-                        let our_format_index: ModelIndex = (&index).into();
+                        let our_format_index: Index = (&index).into();
                         if result != &our_format_index {
                             // alter this index
                             // drop first
@@ -337,7 +341,7 @@ impl Connection for MongoDBTransaction {
                             // create index
                             let index_options = IndexOptions::builder()
                                 .name(result.mongodb_name())
-                                .unique(result.r#type() == ModelIndexType::Unique || result.r#type() == ModelIndexType::Primary)
+                                .unique(result.r#type() == Type::Unique || result.r#type() == Type::Primary)
                                 .sparse(true)
                                 .build();
                             let mut keys = doc!{};
@@ -365,7 +369,7 @@ impl Connection for MongoDBTransaction {
                     // create this index
                     let index_options = IndexOptions::builder()
                         .name(index.mongodb_name())
-                        .unique(index.r#type() == ModelIndexType::Unique || index.r#type() == ModelIndexType::Primary)
+                        .unique(index.r#type() == Type::Unique || index.r#type() == Type::Primary)
                         .sparse(true)
                         .build();
                     let mut keys = doc!{};
@@ -385,34 +389,29 @@ impl Connection for MongoDBTransaction {
         Ok(())
     }
 
-    async fn purge(&self) -> Result<()> {
-        for model in AppCtx::get().unwrap().models() {
+    async fn purge(&self, models: Vec<&Model>) -> Result<()> {
+        for model in models {
             let col = self.get_collection(model);
             col.drop(None).await.unwrap();
         }
         Ok(())
     }
 
-    async fn query_raw(&self, _query: &Value) -> Result<Value> {
+    async fn query_raw(&self, value: &Value) -> Result<Value> {
         unreachable!()
-        // let collection = self.collections.get(table.unwrap()).unwrap();
-        // let result = collection.aggregate(BsonCoder::encode_without_default_type(query), None).await;
-        // if result.is_err() {
-        //
-        // }
     }
 
-    async fn save_object(&self, object: &Object) -> Result<()> {
-        if object.inner.is_new.load(Ordering::SeqCst) {
+    async fn save_object(&self, object: &Object, path: KeyPath) -> teo_runtime::path::Result<()> {
+        if object.is_new() {
             self.create_object(object).await
         } else {
             self.update_object(object).await
         }
     }
 
-    async fn delete_object(&self, object: &Object) -> Result<()> {
-        if object.inner.is_new.load(Ordering::SeqCst) {
-            return Err(Error::object_is_not_saved_thus_cant_be_deleted());
+    async fn delete_object(&self, object: &Object, path: KeyPath) -> teo_runtime::path::Result<()> {
+        if object.is_new() {
+            return Err(error_ext::object_is_not_saved_thus_cant_be_deleted(path));
         }
         let model = object.model();
         let col = self.get_collection(model);
@@ -421,16 +420,16 @@ impl Connection for MongoDBTransaction {
         let result = col.delete_one(document_identifier.clone(), None).await;
         return match result {
             Ok(_result) => Ok(()),
-            Err(_err) => {
-                Err(Error::unknown_database_delete_error())
+            Err(err) => {
+                Err(error_ext::unknown_database_delete_error(path, format!("{}", err))),
             }
         }
     }
 
-    async fn find_unique<'a>(&'a self, model: &'static Model, finder: &'a Value, _mutation_mode: bool, action: Action, action_source: Initiator) -> Result<Option<Object>> {
+    async fn find_unique(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, req_ctx: Option<teo_runtime::request::Ctx>, path: KeyPath) -> teo_runtime::path::Result<Option<Object>> {
         let select = finder.get("select");
         let include = finder.get("include");
-        let aggregate_input = Aggregation::build(model, finder)?;
+        let aggregate_input = Aggregation::build(transaction_ctx.namespace(), model, finder)?;
         let col = self.get_collection(model);
         let cur = col.aggregate(aggregate_input, None).await;
         if cur.is_err() {
@@ -442,7 +441,7 @@ impl Connection for MongoDBTransaction {
             Ok(None)
         } else {
             for doc in results {
-                let obj = AppCtx::get().unwrap().graph().new_object(model, action, action_source.clone(), Arc::new(self.clone()))?;
+                let obj = transaction_ctx.new_object(model, action, req_ctx)?;
                 self.clone().document_to_object(&doc.unwrap(), &obj, select, include)?;
                 return Ok(Some(obj));
             }
@@ -450,10 +449,10 @@ impl Connection for MongoDBTransaction {
         }
     }
 
-    async fn find_many<'a>(&'a self, model: &'static Model, finder: &'a Value, _mutation_mode: bool, action: Action, action_source: Initiator) -> Result<Vec<Object>> {
+    async fn find_many(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, req_ctx: Option<teo_runtime::request::Ctx>, path: KeyPath) -> teo_runtime::path::Result<Vec<Object>> {
         let select = finder.get("select");
         let include = finder.get("include");
-        let aggregate_input = Aggregation::build(model, finder)?;
+        let aggregate_input = Aggregation::build(transaction_ctx.namespace(), model, finder)?;
         let reverse = Input::has_negative_take(finder);
         let col = self.get_collection(model);
         // println!("see aggregate input: {:?}", aggregate_input);
@@ -466,7 +465,7 @@ impl Connection for MongoDBTransaction {
         let mut result: Vec<Object> = vec![];
         let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;
         for doc in results {
-            let obj = AppCtx::get().unwrap().graph().new_object(model, action, action_source.clone(), Arc::new(self.clone()))?;
+            let obj = transaction_ctx.new_object(model, action, req_ctx.clone())?;
             match self.clone().document_to_object(&doc.unwrap(), &obj, select, include) {
                 Ok(_) => {
                     if reverse {
@@ -476,15 +475,15 @@ impl Connection for MongoDBTransaction {
                     }
                 }
                 Err(err) => {
-                    return Err(err);
+                    return Err(error_ext::unknown_database_find_error(path, format!("{}", err)));
                 }
             }
         }
         Ok(result)
     }
 
-    async fn count(&self, model: &Model, finder: &Value) -> Result<usize> {
-        let input = Aggregation::build_for_count(model, finder)?;
+    async fn count(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<usize> {
+        let input = Aggregation::build_for_count(transaction_ctx.namespace(), model, finder)?;
         let col = self.get_collection(model);
         let cur = col.aggregate(input, None).await;
         if cur.is_err() {
@@ -506,8 +505,8 @@ impl Connection for MongoDBTransaction {
         }
     }
 
-    async fn aggregate(&self, model: &Model, finder: &Value) -> Result<Value> {
-        let results = self.aggregate_or_group_by(model, finder).await?;
+    async fn aggregate(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<Value> {
+        let results = self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder).await?;
         if results.is_empty() {
             // there is no record
             let mut retval = teon!({});
@@ -524,16 +523,20 @@ impl Connection for MongoDBTransaction {
         }
     }
 
-    async fn group_by(&self, model: &Model, finder: &Value) -> Result<Value> {
-        Ok(Value::Array(self.aggregate_or_group_by(model, finder).await?))
+    async fn group_by(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<Value> {
+        Ok(Value::Array(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder).await?))
     }
 
-    async fn transaction(&self) -> Result<Arc<dyn Connection>> {
-        Ok(Arc::new(self.clone()))
+    async fn is_committed(&self) -> bool {
+        false
     }
 
     async fn commit(&self) -> Result<()> {
         Ok(())
+    }
+
+    async fn spawn(&self) -> Result<Arc<dyn Transaction>> {
+        Ok(Arc::new(self.clone()))
     }
 }
 

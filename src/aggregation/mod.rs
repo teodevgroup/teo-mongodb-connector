@@ -12,6 +12,7 @@ use teo_runtime::model::field::is_optional::IsOptional;
 use teo_runtime::model::field::named::Named;
 use teo_runtime::model::field::typed::Typed;
 use teo_runtime::namespace::Namespace;
+use crate::bson_ext::teon_value_to_bson;
 
 pub(crate) struct Aggregation { }
 
@@ -434,11 +435,11 @@ impl Aggregation {
                     "isEmpty" => {
                         ("$size".to_string(), Bson::from(0))
                     },
-                    _ => (Self::build_where_key(k).as_str().unwrap().to_string(), Bson::from(v))
+                    _ => (Self::build_where_key(k).as_str().unwrap().to_string(), teon_value_to_bson(v))
                 }
             }).collect()))
         } else {
-            Ok(Bson::from(value))
+            Ok(teon_value_to_bson(value))
         }
     }
 

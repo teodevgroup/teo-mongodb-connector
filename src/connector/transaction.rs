@@ -46,7 +46,7 @@ impl MongoDBTransaction {
 
     fn document_to_object(&self, transaction_ctx: transaction::Ctx, document: &Document, object: &Object, select: Option<&Value>, include: Option<&Value>) -> teo_runtime::path::Result<()> {
         for key in document.keys() {
-            let object_field = object.model().fields().iter().find(|f| f.column_name() == key);
+            let object_field = object.model().fields().iter().find(|f| f.column_name() == key).map(|f| *f);
             if object_field.is_some() {
                 // field
                 let object_field = object_field.unwrap();

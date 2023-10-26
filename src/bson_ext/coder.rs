@@ -9,13 +9,14 @@ use teo_runtime::model::Model;
 use teo_runtime::namespace::Namespace;
 use teo_runtime::utils::ContainsStr;
 use teo_runtime::object::error_ext;
+use crate::bson_ext::teon_value_to_bson;
 
 pub(crate) struct BsonCoder { }
 
 impl BsonCoder {
 
     pub(crate) fn encode_without_default_type(value: &Value) -> Bson {
-        value.clone().into()
+        teon_value_to_bson(value)
     }
 
     pub(crate) fn encode<'a>(r#type: &Type, value: Value) -> Result<Bson> {
@@ -30,7 +31,7 @@ impl BsonCoder {
             } else {
                 Ok(Bson::Null)
             },
-            _ => Ok(value.into()),
+            _ => Ok(teon_value_to_bson(&value)),
         }
     }
 
@@ -93,7 +94,7 @@ impl BsonCoder {
                     Some(arr) => Ok(Value::Array(arr.iter().enumerate().map(|(i, v)| {
                         let path = path + i;
                         Self::decode(namespace, model, inner_field.unwrap_optional(), inner_field.is_optional(), v, path)
-                    }).collect::<Result<Vec<Value>>>()?)),
+                    }).collect::<teo_runtime::path::Result<Vec<Value>>>()?)),
                     None => Err(error_ext::record_decoding_error(model.name(), path, "array")),
                 }
             }

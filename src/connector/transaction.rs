@@ -12,15 +12,18 @@ use mongodb::options::{FindOneAndUpdateOptions, IndexOptions, ReturnDocument};
 use regex::Regex;
 use crate::aggregation::Aggregation;
 use crate::bson_ext::coder::BsonCoder;
-use teo_runtime::action::*;
+use teo_runtime::action::action::*;
 use teo_runtime::model::object::Object;
 use teo_runtime::index::Type;
 use teo_runtime::model::{Index, Model};
 use teo_teon::value::Value;
 use teo_result::{Error, Result};
+use teo_runtime::connection::transaction;
 use teo_runtime::connection::transaction::{Ctx, Transaction};
 use teo_runtime::model::field::column_named::ColumnNamed;
+use teo_runtime::model::field::is_optional::IsOptional;
 use teo_runtime::model::field::named::Named;
+use teo_runtime::model::field::typed::Typed;
 use teo_runtime::sort::Sort;
 use teo_runtime::model::object::input::Input;
 use teo_runtime::namespace::Namespace;
@@ -39,16 +42,16 @@ impl MongoDBTransaction {
         self.database.collection(model.table_name())
     }
 
-    fn document_to_object(&self, document: &Document, object: &Object, select: Option<&Value>, include: Option<&Value>) -> Result<()> {
+    fn document_to_object(&self, transaction_ctx: transaction::Ctx, document: &Document, object: &Object, select: Option<&Value>, include: Option<&Value>) -> Result<()> {
         for key in document.keys() {
             let object_field = object.model().fields().iter().find(|f| f.column_name() == key);
             if object_field.is_some() {
                 // field
                 let object_field = object_field.unwrap();
                 let object_key = &object_field.name;
-                let field_type = object_field.field_type();
+                let r#type = object_field.r#type();
                 let bson_value = document.get(key).unwrap();
-                let value_result = BsonCoder::decode(object.model(), field_type, object_field.is_optional(), bson_value, path![]);
+                let value_result = BsonCoder::decode(object.model(), r#type, object_field.is_optional(), bson_value, path![]);
                 match value_result {
                     Ok(value) => {
                         object.set_value(object_key, value).unwrap();
@@ -79,13 +82,13 @@ impl MongoDBTransaction {
                     None
                 };
                 let relation = relation.unwrap();
-                let model_name = relation.model();
+                let relation_model = transaction_ctx.namespace().model_at_path(&relation.model_path()).unwrap();
                 let object_bsons = document.get(key).unwrap().as_array().unwrap();
                 let mut related: Vec<Object> = vec![];
                 for related_object_bson in object_bsons {
                     let action = NESTED | FIND | (if relation.is_vec { MANY } else { SINGLE });
-                    let related_object = object.graph().new_object(model_name, action, object.action_source().clone(), Arc::new(self.clone()))?;
-                    self.clone().document_to_object(related_object_bson.as_document().unwrap(), &related_object, inner_select, inner_include)?;
+                    let related_object = transaction_ctx.new_object(relation_model, action, object.request_ctx())?;
+                    self.clone().document_to_object(transaction_ctx.clone(), related_object_bson.as_document().unwrap(), &related_object, inner_select, inner_include)?;
                     related.push(related_object);
                 }
                 object.inner.relation_query_map.lock().unwrap().insert(key.to_string(), related);
@@ -97,7 +100,7 @@ impl MongoDBTransaction {
         Ok(())
     }
 
-    fn _handle_write_error(&self, error_kind: &ErrorKind, object: &Object) -> Error {
+    fn _handle_write_error(&self, error_kind: &ErrorKind, object: &Object, path: KeyPath) -> teo_runtime::path::Error {
         return match error_kind {
             ErrorKind::Write(write) => {
                 match write {
@@ -107,31 +110,30 @@ impl MongoDBTransaction {
                                 let regex = Regex::new(r"dup key: \{ (.+?):").unwrap();
                                 let field_column_name = regex.captures(write_error.message.as_str()).unwrap().get(1).unwrap().as_str();
                                 let field_name = object.model().field_with_column_name(field_column_name).unwrap().name();
-                                Error::unique_value_duplicated(field_name.to_string())
+                                error_ext::unique_value_duplicated(path, field_name.to_string())
                             }
                             _ => {
-                                Error::unknown_database_write_error()
+                                error_ext::unknown_database_write_error(path, "")
                             }
                         }
                     }
                     _ => {
-                        Error::unknown_database_write_error()
+                        error_ext::unknown_database_write_error(path, "")
                     }
                 }
             }
             _ => {
-                Error::unknown_database_write_error()
+                error_ext::unknown_database_write_error(path, "")
             }
         }
     }
 
-    async fn aggregate_or_group_by(&self, namespace: &Namespace, model: &Model, finder: &Value) -> Result<Vec<Value>> {
+    async fn aggregate_or_group_by(&self, namespace: &Namespace, model: &Model, finder: &Value, path: KeyPath) -> teo_runtime::path::Result<Vec<Value>> {
         let aggregate_input = Aggregation::build_for_aggregate(namespace, model, finder)?;
         let col = self.get_collection(model);
         let cur = col.aggregate(aggregate_input, None).await;
         if cur.is_err() {
-            println!("{:?}", cur);
-            return Err(Error::unknown_database_find_error());
+            return Err(error_ext::unknown_database_find_error(path, format!("{:?}", cur)));
         }
         let cur = cur.unwrap();
         let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;
@@ -146,27 +148,27 @@ impl MongoDBTransaction {
                 }
                 // aggregate
                 if g.starts_with("_") {
-                    retval.as_hashmap_mut().unwrap().insert(g.clone(), teon!({}));
+                    retval.as_dictionary_mut().unwrap().insert(g.clone(), teon!({}));
                     for (dbk, v) in o.as_document().unwrap() {
                         let k = dbk;
                         if let Some(f) = v.as_f64() {
-                            retval.as_hashmap_mut().unwrap().get_mut(g.as_str()).unwrap().as_hashmap_mut().unwrap().insert(k.to_string(), teon!(f));
+                            retval.as_dictionary_mut().unwrap().get_mut(g.as_str()).unwrap().as_dictionary_mut().unwrap().insert(k.to_string(), teon!(f));
                         } else if let Some(i) = v.as_i64() {
-                            retval.as_hashmap_mut().unwrap().get_mut(g.as_str()).unwrap().as_hashmap_mut().unwrap().insert(k.to_string(), teon!(i));
+                            retval.as_dictionary_mut().unwrap().get_mut(g.as_str()).unwrap().as_dictionary_mut().unwrap().insert(k.to_string(), teon!(i));
                         } else if let Some(i) = v.as_i32() {
-                            retval.as_hashmap_mut().unwrap().get_mut(g.as_str()).unwrap().as_hashmap_mut().unwrap().insert(k.to_string(), teon!(i));
+                            retval.as_dictionary_mut().unwrap().get_mut(g.as_str()).unwrap().as_dictionary_mut().unwrap().insert(k.to_string(), teon!(i));
                         } else if v.as_null().is_some() {
-                            retval.as_hashmap_mut().unwrap().get_mut(g.as_str()).unwrap().as_hashmap_mut().unwrap().insert(k.to_string(), teon!(null));
+                            retval.as_dictionary_mut().unwrap().get_mut(g.as_str()).unwrap().as_dictionary_mut().unwrap().insert(k.to_string(), teon!(null));
                         }
                     }
                 } else {
                     // group by field
                     let field = model.field(g).unwrap();
                     let val = if o.as_null().is_some() { Value::Null } else {
-                        BsonCoder::decode(model, field.field_type(), true, o, path![])?
+                        BsonCoder::decode(namespace, model, field.r#type(), true, o, path![])?
                     };
                     let json_val = val;
-                    retval.as_hashmap_mut().unwrap().insert(g.to_string(), json_val);
+                    retval.as_dictionary_mut().unwrap().insert(g.to_string(), json_val);
                 }
             }
             final_retval.push(retval);
@@ -178,18 +180,18 @@ impl MongoDBTransaction {
         let model = object.model();
         let keys = object.keys_for_save();
         let col = self.get_collection(model);
-        let auto_keys = model.auto_keys();
+        let auto_keys = &model.cache.auto_keys;
         // create
         let mut doc = doc!{};
         for key in keys {
             if let Some(field) = model.field(key) {
                 let column_name = field.column_name();
-                let val: Bson = BsonCoder::encode(field.field_type(), object.get_value(&key).unwrap())?;
+                let val: Bson = BsonCoder::encode(field.r#type(), object.get_value(&key).unwrap())?;
                 if val != Bson::Null {
                     doc.insert(column_name, val);
                 }
             } else if let Some(property) = model.property(key) {
-                let val: Bson = BsonCoder::encode(property.field_type(), object.get_property(&key).await.unwrap())?;
+                let val: Bson = BsonCoder::encode(property.r#type(), object.get_property(&key).await.unwrap())?;
                 if val != Bson::Null {
                     doc.insert(key, val);
                 }
@@ -202,7 +204,7 @@ impl MongoDBTransaction {
                 for key in auto_keys {
                     let field = model.field(key).unwrap();
                     if field.column_name() == "_id" {
-                        let new_value = BsonCoder::decode(model, field.field_type(), field.is_optional(), &id, path![]).unwrap();
+                        let new_value = BsonCoder::decode(model, field.r#type(), field.is_optional(), &id, path![]).unwrap();
                         object.set_value(field.name(), new_value)?;
                     }
                 }
@@ -229,17 +231,17 @@ impl MongoDBTransaction {
             if let Some(field) = model.field(key) {
                 let column_name = field.column_name();
                 if let Some(updator) = object.get_atomic_updator(key) {
-                    let (key, val) = Input::key_value(updator.as_hashmap().unwrap());
+                    let (key, val) = Input::key_value(updator.as_dictionary().unwrap());
                     match key {
                         "increment" => inc.insert(column_name, teon_value_to_bson(val)),
                         "decrement" => inc.insert(column_name, teon_value_to_bson(&val.neg().unwrap())),
                         "multiply" => mul.insert(column_name, teon_value_to_bson(val)),
-                        "divide" => mul.insert(column_name, Bson::Double(val.recip())),
+                        "divide" => mul.insert(column_name, Bson::Double(val.recip().unwrap().to_float().unwrap().abs())),
                         "push" => push.insert(column_name, teon_value_to_bson(val)),
                         _ => panic!("Unhandled key."),
                     };
                 } else {
-                    let bson_val: Bson = BsonCoder::encode(field.field_type(), object.get_value(&key).unwrap())?;
+                    let bson_val: Bson = BsonCoder::encode(field.r#type(), object.get_value(&key).unwrap())?;
                     if bson_val == Bson::Null {
                         unset.insert(key, bson_val);
                     } else {
@@ -247,7 +249,7 @@ impl MongoDBTransaction {
                     }
                 }
             } else if let Some(property) = model.property(key) {
-                let bson_val: Bson = BsonCoder::encode(property.field_type(), object.get_property(&key).await.unwrap())?;
+                let bson_val: Bson = BsonCoder::encode(property.r#type(), object.get_property(&key).await.unwrap())?;
                 if bson_val != Bson::Null {
                     set.insert(key, bson_val);
                 } else {
@@ -294,8 +296,8 @@ impl MongoDBTransaction {
                     for key in object.inner.atomic_updater_map.lock().unwrap().keys() {
                         let bson_new_val = updated_document.as_ref().unwrap().get(key).unwrap();
                         let field = object.model().field(key).unwrap();
-                        let field_value = BsonCoder::decode(model, field.field_type(), field.is_optional(), bson_new_val, path![])?;
-                        object.inner.value_map.lock().unwrap().insert(key.to_string(), field_value);
+                        let field_value = BsonCoder::decode(model, field.r#type(), field.is_optional(), bson_new_val, path![])?;
+                        object.set_value(key, field_value).unwrap();
                     }
                 }
                 Err(error) => {
@@ -326,7 +328,7 @@ impl Transaction for MongoDBTransaction {
                         continue
                     }
                     let name = (&index).options.as_ref().unwrap().name.as_ref().unwrap();
-                    let result = model.indices().iter().find(|i| &i.mongodb_name() == name);
+                    let result = model.indexes().iter().find(|i| &i.mongodb_name() == name);
                     if result.is_none() {
                         // not in our model definition, but in the database
                         // drop this index
@@ -357,7 +359,7 @@ impl Transaction for MongoDBTransaction {
                     reviewed_names.push(name.clone());
                 }
             }
-            for index in model.indices() {
+            for index in model.indexes() {
                 if !reviewed_names.contains(&index.mongodb_name()) {
                     // ignore primary
                     if index.keys().len() == 1 {
@@ -421,7 +423,7 @@ impl Transaction for MongoDBTransaction {
         return match result {
             Ok(_result) => Ok(()),
             Err(err) => {
-                Err(error_ext::unknown_database_delete_error(path, format!("{}", err))),
+                Err(error_ext::unknown_database_delete_error(path, format!("{}", err)))
             }
         }
     }
@@ -433,7 +435,7 @@ impl Transaction for MongoDBTransaction {
         let col = self.get_collection(model);
         let cur = col.aggregate(aggregate_input, None).await;
         if cur.is_err() {
-            return Err(Error::unknown_database_find_unique_error());
+            return Err(error_ext::unknown_database_find_error(path, ""));
         }
         let cur = cur.unwrap();
         let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;
@@ -442,7 +444,7 @@ impl Transaction for MongoDBTransaction {
         } else {
             for doc in results {
                 let obj = transaction_ctx.new_object(model, action, req_ctx)?;
-                self.clone().document_to_object(&doc.unwrap(), &obj, select, include)?;
+                self.clone().document_to_object(transaction_ctx, &doc.unwrap(), &obj, select, include)?;
                 return Ok(Some(obj));
             }
             Ok(None)
@@ -466,7 +468,7 @@ impl Transaction for MongoDBTransaction {
         let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;
         for doc in results {
             let obj = transaction_ctx.new_object(model, action, req_ctx.clone())?;
-            match self.clone().document_to_object(&doc.unwrap(), &obj, select, include) {
+            match self.clone().document_to_object(transaction_ctx.clone(), &doc.unwrap(), &obj, select, include) {
                 Ok(_) => {
                     if reverse {
                         result.insert(0, obj);
@@ -506,15 +508,15 @@ impl Transaction for MongoDBTransaction {
     }
 
     async fn aggregate(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<Value> {
-        let results = self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder).await?;
+        let results = self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?;
         if results.is_empty() {
             // there is no record
             let mut retval = teon!({});
-            for (g, o) in finder.as_hashmap().unwrap() {
-                retval.as_hashmap_mut().unwrap().insert(g.clone(), teon!({}));
-                for (k, _v) in o.as_hashmap().unwrap() {
+            for (g, o) in finder.as_dictionary().unwrap() {
+                retval.as_dictionary_mut().unwrap().insert(g.clone(), teon!({}));
+                for (k, _v) in o.as_dictionary().unwrap() {
                     let value = if g == "_count" { teon!(0) } else { teon!(null) };
-                    retval.as_hashmap_mut().unwrap().get_mut(g.as_str()).unwrap().as_hashmap_mut().unwrap().insert(k.to_string(), value);
+                    retval.as_dictionary_mut().unwrap().get_mut(g.as_str()).unwrap().as_dictionary_mut().unwrap().insert(k.to_string(), value);
                 }
             }
             Ok(retval)
@@ -524,7 +526,7 @@ impl Transaction for MongoDBTransaction {
     }
 
     async fn group_by(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<Value> {
-        Ok(Value::Array(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder).await?))
+        Ok(Value::Array(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?))
     }
 
     async fn is_committed(&self) -> bool {

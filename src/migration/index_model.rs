@@ -20,6 +20,6 @@ impl FromIndexModel for Index {
             let item = Item::new(k_longlive, if v.as_i32().unwrap() == 1 { Sort::Asc } else { Sort::Desc }, None);
             items.push(item);
         }
-        Index::new(if unique { Type::Unique } else { Type::Index }, Some(index_model.options.as_ref().unwrap().name.as_ref().unwrap().to_string()), items)
+        Index::new(if unique { Type::Unique } else { Type::Index }, index_model.options.as_ref().unwrap().name.as_ref().unwrap().to_string(), items)
     }
 }

@@ -65,8 +65,8 @@ impl Aggregation {
         let having = value.get("having");
         let mut aggregates = teon!({});
         for k in ["_sum", "_count", "_avg", "_min", "_max"] {
-            if value.as_hashmap().unwrap().contains_key(k) {
-                aggregates[k] = value.as_hashmap().unwrap().get(k).unwrap().clone();
+            if value.as_dictionary().unwrap().contains_key(k) {
+                aggregates[k] = value.as_dictionary().unwrap().get(k).unwrap().clone();
             }
         }
         let mut group = if let Some(by) = by {
@@ -92,17 +92,17 @@ impl Aggregation {
             }
         }
         if let Some(having) = having {
-            for (k, o) in having.as_hashmap().unwrap() {
+            for (k, o) in having.as_dictionary().unwrap() {
                 let _dbk = model.field(k).unwrap().column_name();
-                for (g, _matcher) in o.as_hashmap().unwrap() {
+                for (g, _matcher) in o.as_dictionary().unwrap() {
                     let g = g.strip_prefix("_").unwrap();
                     Self::insert_group_set_unset_for_aggregate(model, &mut group, &mut set, &mut unset, k, g, true);
                 }
             }
         }
-        for (g, o) in aggregates.as_hashmap().unwrap() {
+        for (g, o) in aggregates.as_dictionary().unwrap() {
             let g = g.strip_prefix("_").unwrap();
-            for (k, _t) in o.as_hashmap().unwrap() {
+            for (k, _t) in o.as_dictionary().unwrap() {
                 Self::insert_group_set_unset_for_aggregate(model, &mut group, &mut set, &mut unset, k, g, false);
             }
         }
@@ -115,9 +115,9 @@ impl Aggregation {
         if let Some(having) = having {
             let mut having_match = doc!{};
             let mut having_unset: Vec<String> = Vec::new();
-            for (k, o) in having.as_hashmap().unwrap() {
+            for (k, o) in having.as_dictionary().unwrap() {
                 let dbk = model.field(k).unwrap().column_name();
-                for (g, matcher) in o.as_hashmap().unwrap() {
+                for (g, matcher) in o.as_dictionary().unwrap() {
                     let g = g.strip_prefix("_").unwrap();
                     let matcher_bson = Self::build_where_item(model, &Type::Float, true, matcher)?;
                     having_match.insert(format!("_having_{g}.{dbk}"), matcher_bson);
@@ -163,10 +163,10 @@ impl Aggregation {
         let include = value.get("include");
         // if cursor exists, we modify the actual where
         let cursor_where_additions = if let Some(cursor) = value.get("cursor") {
-            let cursor = cursor.as_hashmap().unwrap();
+            let cursor = cursor.as_dictionary().unwrap();
             let cursor_key = cursor.keys().next().unwrap();
             let cursor_value = cursor.values().next().unwrap();
-            let order_by = value.get("orderBy").unwrap().as_vec().unwrap().get(0).unwrap().as_hashmap().unwrap().values().next().unwrap().as_str().unwrap();
+            let order_by = value.get("orderBy").unwrap().as_vec().unwrap().get(0).unwrap().as_dictionary().unwrap().values().next().unwrap().as_str().unwrap();
             let mut order_asc = order_by == "asc";
             if let Some(take) = take {
                 if take.as_i64().unwrap() < 0 {
@@ -273,7 +273,7 @@ impl Aggregation {
         } else {
             // $project
             if let Some(select) = select {
-                if !select.as_hashmap().unwrap().is_empty() {
+                if !select.as_dictionary().unwrap().is_empty() {
                     let select_input = Self::build_select(model, select, distinct)?;
                     if !select_input.is_empty() {
                         retval.push(doc!{"$project": select_input})
@@ -292,7 +292,7 @@ impl Aggregation {
     }
 
     fn build_select(model: &Model, select: &Value, distinct: Option<&Value>) -> Result<Document> {
-        let map = select.as_hashmap().unwrap();
+        let map = select.as_dictionary().unwrap();
         let true_keys: Vec<&str> = map.iter().filter(|(_k, v)| v.as_bool().unwrap() == true).map(|(k, _)| k.as_str()).collect();
         let false_keys: Vec<&str> = map.iter().filter(|(_k, v)| v.as_bool().unwrap() == false).map(|(k, _)| k.as_str()).collect();
         let primary_field_names = model.primary_index().keys();
@@ -329,7 +329,7 @@ impl Aggregation {
     fn build_order_by(model: &Model, order_by: &Value, reverse: bool) -> Result<Document> {
         let mut retval = doc!{};
         for sort in order_by.as_vec().unwrap().iter() {
-            let (key, value) = Input::key_value(sort.as_hashmap().unwrap());
+            let (key, value) = Input::key_value(sort.as_dictionary().unwrap());
             let key = model.field(key).unwrap().column_name();
             if value.is_string() {
                 let str_val = value.as_str().unwrap();
@@ -344,7 +344,7 @@ impl Aggregation {
     }
 
     fn build_where(namespace: &Namespace, model: &Model, value: &Value) -> Result<Document> {
-        let value_map = value.as_hashmap().unwrap();
+        let value_map = value.as_dictionary().unwrap();
         let mut retval = doc!{};
         for (key, value) in value_map.iter() {
             let key = key.as_str();
@@ -369,10 +369,10 @@ impl Aggregation {
                 _ => {
                     if let Some(field) = model.field(key) {
                         let column_name = field.column_name();
-                        retval.insert(column_name, Self::build_where_item(model, field.field_type(), field.is_optional(), value)?);
+                        retval.insert(column_name, Self::build_where_item(model, field.r#type(), field.is_optional(), value)?);
                     } else if let Some(relation) = model.relation(key) {
                         let relation_model = namespace.model_at_path(&relation.model_path()).unwrap();
-                        let (command, inner_where) = Input::key_value(value.as_hashmap().unwrap());
+                        let (command, inner_where) = Input::key_value(value.as_dictionary().unwrap());
                         let _inner_where = Self::build_where(namespace, relation_model, inner_where)?;
                         match command {
                             "none" | "isNot" => {
@@ -394,7 +394,7 @@ impl Aggregation {
     }
 
     fn build_where_item(_model: &Model, _type: &Type, _optional: bool, value: &Value) -> Result<Bson> {
-        if let Some(map) = value.as_hashmap() {
+        if let Some(map) = value.as_dictionary() {
             Ok(Bson::Document(map.iter().filter(|(k, _)| k.as_str() != "mode").map(|(k, v)| {
                 let k = k.as_str();
                 match k {
@@ -460,11 +460,11 @@ impl Aggregation {
     }
 
     fn build_lookups(namespace: &Namespace, model: &Model, include: &Value) -> Result<Vec<Document>> {
-        let include = include.as_hashmap().unwrap();
+        let include = include.as_dictionary().unwrap();
         let mut retval: Vec<Document> = vec![];
         for (key, value) in include {
             let relation = model.relation(key).unwrap();
-            if (value.is_bool() && (value.as_bool().unwrap() == true)) || (value.is_hashmap()) {
+            if (value.is_bool() && (value.as_bool().unwrap() == true)) || (value.is_dictionary()) {
                 if relation.has_join_table() {
                     retval.extend(Self::build_lookup_with_join_table(namespace, model, key, relation, value)?)
                 } else {
@@ -498,7 +498,7 @@ impl Aggregation {
             inner_let_value.insert(jt_column_name, format!("${jt_column_name}"));
             inner_eq_values.push(doc! {"$eq": [format!("${foreign_column_name}"), format!("$${jt_column_name}")]});
         }
-        let mut original_inner_pipeline = if value.is_hashmap() {
+        let mut original_inner_pipeline = if value.is_dictionary() {
             Self::build(namespace, opposite_model, value)?
         } else {
             vec![]
@@ -657,7 +657,7 @@ impl Aggregation {
             let_value.insert(reference_name, format!("${field_column_name}"));
             eq_values.push(doc!{"$eq": [format!("${reference_column_name}"), format!("$${reference_name}")]});
         }
-        let mut inner_pipeline = if value.is_hashmap() {
+        let mut inner_pipeline = if value.is_dictionary() {
             Self::build(namespace, opposite_model, value)?
         } else {
             vec![]
@@ -701,7 +701,7 @@ impl Aggregation {
     }
 
     fn build_unsets_for_relation_where(model: &Model, r#where: &Value) -> Result<Vec<Document>> {
-        let r#where = r#where.as_hashmap().unwrap();
+        let r#where = r#where.as_dictionary().unwrap();
         let mut retval: Vec<Document> = vec![];
         for (key, _) in r#where.iter() {
             if let Some(_) = model.relation(key) {
@@ -712,12 +712,12 @@ impl Aggregation {
     }
 
     fn build_lookups_for_relation_where(namespace: &Namespace, model: &Model, r#where: &Value) -> Result<Vec<Document>> {
-        let r#where = r#where.as_hashmap().unwrap();
+        let r#where = r#where.as_dictionary().unwrap();
         let mut include_input = IndexMap::new();
         for (key, value) in r#where.iter() {
             let relation = model.relation(key);
             if relation.is_some() {
-                let (command, r_where) = Input::key_value(value.as_hashmap().unwrap());
+                let (command, r_where) = Input::key_value(value.as_dictionary().unwrap());
                 match command {
                     "some" | "is" => {
                         include_input.insert(key.to_string(), teon!({

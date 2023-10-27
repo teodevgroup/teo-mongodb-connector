@@ -316,6 +316,7 @@ impl MongoDBTransaction {
 
 #[async_trait]
 impl Transaction for MongoDBTransaction {
+
     async fn migrate(&self, models: Vec<&Model>, dry_run: bool, reset_database: bool, silent: bool) -> Result<()> {
         if reset_database {
             let _ = self.database.drop(None).await;
@@ -531,11 +532,19 @@ impl Transaction for MongoDBTransaction {
         Ok(Value::Array(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?))
     }
 
-    async fn is_committed(&self) -> bool {
+    fn is_committed(&self) -> bool {
+        false
+    }
+
+    fn is_transaction(&self) -> bool {
         false
     }
 
     async fn commit(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn abort(&self) -> Result<()> {
         Ok(())
     }
 

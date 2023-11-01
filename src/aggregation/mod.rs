@@ -9,7 +9,7 @@ use teo_teon::{teon, Value};
 use teo_result::{Error, Result};
 use teo_runtime::model::field::column_named::ColumnNamed;
 use teo_runtime::model::field::is_optional::IsOptional;
-use teo_runtime::model::field::named::Named;
+use teo_runtime::traits::named::Named;
 use teo_runtime::model::field::typed::Typed;
 use teo_runtime::namespace::Namespace;
 use crate::bson_ext::teon_value_to_bson;

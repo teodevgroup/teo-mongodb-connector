@@ -3,7 +3,7 @@ use indexmap::IndexMap;
 use key_path::KeyPath;
 use teo_result::{Error, Result};
 use teo_parser::r#type::Type;
-use teo_runtime::model::field::named::Named;
+use teo_runtime::traits::named::Named;
 use teo_teon::Value;
 use teo_runtime::model::Model;
 use teo_runtime::namespace::Namespace;

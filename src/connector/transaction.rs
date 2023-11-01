@@ -22,7 +22,7 @@ use teo_runtime::connection::transaction;
 use teo_runtime::connection::transaction::{Ctx, Transaction};
 use teo_runtime::model::field::column_named::ColumnNamed;
 use teo_runtime::model::field::is_optional::IsOptional;
-use teo_runtime::model::field::named::Named;
+use teo_runtime::traits::named::Named;
 use teo_runtime::model::field::typed::Typed;
 use teo_runtime::sort::Sort;
 use teo_runtime::model::object::input::Input;

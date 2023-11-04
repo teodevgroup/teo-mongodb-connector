@@ -528,8 +528,8 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn group_by(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<Value> {
-        Ok(Value::Array(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?))
+    async fn group_by(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<Vec<Value>> {
+        Ok(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?)
     }
 
     fn is_committed(&self) -> bool {

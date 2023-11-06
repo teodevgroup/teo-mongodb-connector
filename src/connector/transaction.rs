@@ -194,7 +194,7 @@ impl MongoDBTransaction {
                     doc.insert(column_name, val);
                 }
             } else if let Some(property) = model.property(key) {
-                let val: Bson = BsonCoder::encode(property.r#type(), object.get_property(&key).await.unwrap())?;
+                let val: Bson = BsonCoder::encode(property.r#type(), object.get_property_value(&key).await?)?;
                 if val != Bson::Null {
                     doc.insert(key, val);
                 }
@@ -253,7 +253,7 @@ impl MongoDBTransaction {
                     }
                 }
             } else if let Some(property) = model.property(key) {
-                let bson_val: Bson = BsonCoder::encode(property.r#type(), object.get_property(&key).await.unwrap())?;
+                let bson_val: Bson = BsonCoder::encode(property.r#type(), object.get_property_value(&key).await?)?;
                 if bson_val != Bson::Null {
                     set.insert(key, bson_val);
                 } else {

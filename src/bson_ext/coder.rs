@@ -78,9 +78,9 @@ impl BsonCoder {
                 Some(val) => Ok(Value::DateTime(val.to_chrono())),
                 None => Err(error_ext::record_decoding_error(model.name(), path, "datetime")),
             }
-            Type::EnumVariant(_, string_path) => match bson_value.as_str() {
+            Type::EnumVariant(reference) => match bson_value.as_str() {
                 Some(val) => {
-                    let e = namespace.enum_at_path(&string_path.iter().map(|s| s.as_str()).collect()).unwrap();
+                    let e = namespace.enum_at_path(&reference.str_path()).unwrap();
                     if e.cache.member_names.contains_str(val) {
                         Ok(Value::String(val.to_owned()))
                     } else {

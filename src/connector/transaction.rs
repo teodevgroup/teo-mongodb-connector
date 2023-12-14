@@ -109,12 +109,14 @@ impl MongoDBTransaction {
                     WriteFailure::WriteError(write_error) => {
                         match write_error.code {
                             11000 => {
+                                let full_regex = Regex::new(r"dup key: (.+)").unwrap();
                                 let regex = Regex::new(r"dup key: \{ (.+?):").unwrap();
+                                let full_message = full_regex.captures(write_error.message.as_str()).unwrap().get(1).unwrap().as_str();
                                 let field_column_name = regex.captures(write_error.message.as_str()).unwrap().get(1).unwrap().as_str();
                                 if let Some(field_column) = object.model().field_with_column_name(field_column_name) {
-                                    error_ext::unique_value_duplicated(path + field_column.name(), field_column.name().to_string())
+                                    error_ext::unique_value_duplicated(path + field_column.name(), full_message)
                                 } else {
-                                    error_ext::unique_value_duplicated(path, field_column_name)
+                                    error_ext::unique_value_duplicated(path, full_message)
                                 }
                             }
                             _ => {

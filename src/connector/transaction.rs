@@ -111,8 +111,11 @@ impl MongoDBTransaction {
                             11000 => {
                                 let regex = Regex::new(r"dup key: \{ (.+?):").unwrap();
                                 let field_column_name = regex.captures(write_error.message.as_str()).unwrap().get(1).unwrap().as_str();
-                                let field_name = object.model().field_with_column_name(field_column_name).unwrap().name();
-                                error_ext::unique_value_duplicated(path, field_name.to_string())
+                                if let Some(field_column) = object.model().field_with_column_name(field_column_name) {
+                                    error_ext::unique_value_duplicated(path + field_column.name(), field_column.name().to_string())
+                                } else {
+                                    error_ext::unique_value_duplicated(path, field_column_name)
+                                }
                             }
                             _ => {
                                 error_ext::unknown_database_write_error(path, "")

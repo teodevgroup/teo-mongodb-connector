@@ -1,6 +1,6 @@
 [package]
 name = "teo-mongodb-connector"
-version = "0.0.59"
+version = "0.0.60"
 edition = "2021"
 description = "MongoDB connector for Teo"
 license = "Apache-2.0"
@@ -13,8 +13,8 @@ repository = "https://github.com/teocloud/teo-mongo-connector"
 [dependencies]
 teo-result = "0.0.59"
 teo-teon = "0.0.59"
-teo-parser = "0.0.59"
-teo-runtime = "0.0.59"
+teo-parser = { path = "../teo-parser" }
+teo-runtime = { path = "../teo-runtime" }
 bson = { version = "2.7.0", features = ["chrono-0_4", "serde_with"] }
 mongodb = { version = "2.7.0" }
 async-recursion = "1.0.5"

@@ -40,7 +40,7 @@ impl BsonCoder {
             return Ok(Value::Null);
         }
         let path = path.as_ref();
-        match r#type {
+        match r#type.unwrap_optional() {
             Type::ObjectId => match bson_value.as_object_id() {
                 Some(oid) => Ok(Value::ObjectId(oid)),
                 None => Err(error_ext::record_decoding_error(model.name(), path, "object id")),

@@ -11,20 +11,20 @@ repository = "https://github.com/teocloud/teo-mongo-connector"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-teo-result = "0.0.61"
-teo-teon = "0.0.61"
-teo-parser = "0.0.61"
-teo-runtime = "0.0.61"
+teo-result = "0.0.62"
+teo-teon = "0.0.62"
+teo-parser = "0.0.62"
+teo-runtime = "0.0.62"
 bson = { version = "2.7.0", features = ["chrono-0_4", "serde_with"] }
 mongodb = { version = "2.7.0" }
 async-recursion = "1.0.5"
 async-trait = "0.1.74"
 maplit = "1.0.2"
-indexmap = { version = "2.0.2", features = ["serde"] }
+indexmap = { version = "2.1.0", features = ["serde"] }
 tokio = { version = "1.0", features = ["full"] }
 chrono = { version = "0.4.31", features = ["serde"] }
 bigdecimal = "=0.3.1"
-itertools = "0.11.0"
+itertools = "0.12.0"
 regex = "1.10.2"
 snailquote = "0.3.1"
 key-path = "0.2.0"

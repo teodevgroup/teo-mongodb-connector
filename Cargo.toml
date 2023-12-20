@@ -1,6 +1,6 @@
 [package]
 name = "teo-mongodb-connector"
-version = "0.0.61"
+version = "0.0.62"
 edition = "2021"
 description = "MongoDB connector for Teo"
 license = "Apache-2.0"

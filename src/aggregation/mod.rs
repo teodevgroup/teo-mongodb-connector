@@ -216,7 +216,7 @@ impl Aggregation {
         if distinct.is_none() {
             if let Some(order_by) = order_by {
                 let reverse = match take {
-                    Some(take) => take.as_int64().unwrap() < 0,
+                    Some(take) => take.to_int64().unwrap() < 0,
                     None => false
                 };
                 let sort = Self::build_order_by(model, order_by, reverse)?;
@@ -224,7 +224,7 @@ impl Aggregation {
                     retval.push(doc!{"$sort": sort});
                 }
             } else if let Some(take) = take {
-                if take.as_int64().unwrap() < 0 {
+                if take.to_int64().unwrap() < 0 {
                     let sort = Self::build_order_by(model, &Self::default_desc_order(model), false)?;
                     retval.push(doc!{"$sort": sort});
                 }

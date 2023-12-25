@@ -1,6 +1,6 @@
 [package]
 name = "teo-mongodb-connector"
-version = "0.0.63"
+version = "0.0.64"
 edition = "2021"
 description = "MongoDB connector for Teo"
 license = "Apache-2.0"
@@ -11,10 +11,10 @@ repository = "https://github.com/teocloud/teo-mongo-connector"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-teo-result = "0.0.63"
-teo-teon = "0.0.63"
-teo-parser = "0.0.63"
-teo-runtime = "0.0.63"
+teo-result = "0.0.64"
+teo-teon = "0.0.64"
+teo-parser = "0.0.64"
+teo-runtime = "0.0.64"
 bson = { version = "2.7.0", features = ["chrono-0_4", "serde_with"] }
 mongodb = { version = "2.7.0" }
 async-recursion = "1.0.5"

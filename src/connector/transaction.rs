@@ -493,7 +493,16 @@ impl Transaction for MongoDBTransaction {
         Ok(result)
     }
 
-    async fn count(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<usize> {
+    async fn count(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<Value> {
+        if finder.get("select").is_some() {
+            self.count_fields(model, finder, transaction_ctx, path).await
+        } else {
+            let counts = self.count_objects(model, finder, transaction_ctx, path).await?;
+            Ok(Value::Int64(counts as i64))
+        }
+    }
+
+    async fn count_objects(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<usize> {
         let input = Aggregation::build_for_count(transaction_ctx.namespace(), model, finder)?;
         let col = self.get_collection(model);
         let cur = col.aggregate(input, None).await;
@@ -513,6 +522,18 @@ impl Transaction for MongoDBTransaction {
                 _ => panic!("Unhandled count number type.")
             }
         }
+    }
+
+    async fn count_fields(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<Value> {
+        let new_finder = Value::Dictionary(finder.as_dictionary().unwrap().iter().map(|(k, v)| {
+            if k.as_str() == "select" {
+                ("_count".to_owned(), v.clone())
+            } else {
+                (k.to_owned(), v.clone())
+            }
+        }).collect());
+        let aggregate_value = self.aggregate(model, &new_finder, transaction_ctx, path).await?;
+        Ok(aggregate_value.get("_count").unwrap().clone())
     }
 
     async fn aggregate(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_runtime::path::Result<Value> {

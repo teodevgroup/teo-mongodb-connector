@@ -35,7 +35,7 @@ impl BsonCoder {
         }
     }
 
-    pub(crate) fn decode<'a>(namespace: &Namespace, model: &Model, r#type: &Type, optional: bool, bson_value: &Bson, path: impl AsRef<KeyPath>) -> teo_runtime::path::Result<Value> {
+    pub(crate) fn decode<'a>(namespace: &Namespace, model: &Model, r#type: &Type, optional: bool, bson_value: &Bson, path: impl AsRef<KeyPath>) -> teo_result::Result<Value> {
         if bson_value.as_null().is_some() && optional {
             return Ok(Value::Null);
         }
@@ -94,7 +94,7 @@ impl BsonCoder {
                     Some(arr) => Ok(Value::Array(arr.iter().enumerate().map(|(i, v)| {
                         let path = path + i;
                         Self::decode(namespace, model, inner_field.unwrap_optional(), inner_field.is_optional(), v, path)
-                    }).collect::<teo_runtime::path::Result<Vec<Value>>>()?)),
+                    }).collect::<teo_result::Result<Vec<Value>>>()?)),
                     None => Err(error_ext::record_decoding_error(model.name(), path, "array")),
                 }
             }

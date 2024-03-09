@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use bson::{Bson, doc, Document};
 use futures_util::StreamExt;
 use key_path::{KeyPath, path};
-use mongodb::{Database, Collection, IndexModel, Client, ClientSession};
+use mongodb::{Database, Collection, IndexModel, ClientSession};
 use mongodb::error::{ErrorKind, WriteFailure, Error as MongoDBError};
 use mongodb::options::{FindOneAndUpdateOptions, IndexOptions, ReturnDocument};
 use regex::Regex;
@@ -18,7 +18,6 @@ use teo_runtime::index::Type;
 use teo_runtime::model::{Index, Model};
 use teo_teon::value::Value;
 use teo_result::{Error, Result};
-use teo_runtime::connection::transaction;
 use teo_runtime::connection::transaction::{Ctx, Transaction};
 use teo_runtime::model::field::column_named::ColumnNamed;
 use teo_runtime::model::field::is_optional::IsOptional;
@@ -222,7 +221,7 @@ impl MongoDBTransaction {
         Ok(final_retval)
     }
 
-    async fn create_object(&self, object: &Object, path: KeyPath) -> teo_result::Result<()> {
+    async fn create_object(&self, object: &Object, path: KeyPath) -> Result<()> {
         let namespace = object.namespace();
         let model = object.model();
         let keys = object.keys_for_save();
@@ -244,7 +243,14 @@ impl MongoDBTransaction {
                 }
             }
         }
-        let result = col.insert_one(doc, None).await;
+        let result = match self.session() {
+            Some(session) => {
+                col.insert_one_with_session(doc, None, session).await
+            }
+            None => {
+                col.insert_one(doc, None).await
+            }
+        };
         match result {
             Ok(insert_one_result) => {
                 let id = insert_one_result.inserted_id;
@@ -263,7 +269,7 @@ impl MongoDBTransaction {
         Ok(())
     }
 
-    async fn update_object(&self, object: &Object, path: KeyPath) -> teo_result::Result<()> {
+    async fn update_object(&self, object: &Object, path: KeyPath) -> Result<()> {
         let namespace = object.namespace();
         let model = object.model();
         let keys = object.keys_for_save();
@@ -329,7 +335,10 @@ impl MongoDBTransaction {
             return Ok(());
         }
         if !return_new {
-            let result = col.update_one(identifier.clone(), update_doc, None).await;
+            let result = match self.session() {
+                None => col.update_one(identifier.clone(), update_doc, None).await,
+                Some(session) => col.update_one_with_session(identifier.clone(), update_doc, None, session).await,
+            };
             return match result {
                 Ok(_) => Ok(()),
                 Err(error) => {
@@ -338,7 +347,10 @@ impl MongoDBTransaction {
             }
         } else {
             let options = FindOneAndUpdateOptions::builder().return_document(ReturnDocument::After).build();
-            let result = col.find_one_and_update(identifier.clone(), update_doc, options).await;
+            let result = match self.session() {
+                None => col.find_one_and_update(identifier.clone(), update_doc, options).await,
+                Some(session) => col.find_one_and_update_with_session(identifier.clone(), update_doc, options, session).await,
+            };
             match result {
                 Ok(updated_document) => {
                     for (key, value) in object.inner.atomic_updater_map.lock().unwrap().iter() {
@@ -452,7 +464,7 @@ impl Transaction for MongoDBTransaction {
         unreachable!()
     }
 
-    async fn save_object(&self, object: &Object, path: KeyPath) -> teo_result::Result<()> {
+    async fn save_object(&self, object: &Object, path: KeyPath) -> Result<()> {
         if object.is_new() {
             self.create_object(object, path).await
         } else {
@@ -460,7 +472,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn delete_object(&self, object: &Object, path: KeyPath) -> teo_result::Result<()> {
+    async fn delete_object(&self, object: &Object, path: KeyPath) -> Result<()> {
         if object.is_new() {
             return Err(error_ext::object_is_not_saved_thus_cant_be_deleted(path));
         }
@@ -468,7 +480,10 @@ impl Transaction for MongoDBTransaction {
         let col = self.get_collection(model);
         let bson_identifier: Bson = teon_value_to_bson(&object.db_identifier());
         let document_identifier = bson_identifier.as_document().unwrap();
-        let result = col.delete_one(document_identifier.clone(), None).await;
+        let result = match self.session() {
+            None => col.delete_one(document_identifier.clone(), None).await,
+            Some(session) => col.delete_one_with_session(document_identifier.clone(), None, session).await,
+        };
         return match result {
             Ok(_result) => Ok(()),
             Err(err) => {
@@ -477,17 +492,12 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn find_unique(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, req_ctx: Option<teo_runtime::request::Ctx>, path: KeyPath) -> teo_result::Result<Option<Object>> {
+    async fn find_unique(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, req_ctx: Option<teo_runtime::request::Ctx>, path: KeyPath) -> Result<Option<Object>> {
         let select = finder.get("select");
         let include = finder.get("include");
         let aggregate_input = Aggregation::build(transaction_ctx.namespace(), model, finder)?;
         let col = self.get_collection(model);
-        let cur = col.aggregate(aggregate_input, None).await;
-        if cur.is_err() {
-            return Err(error_ext::unknown_database_find_error(path, ""));
-        }
-        let cur = cur.unwrap();
-        let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;
+        let results = self.aggregate_to_documents(aggregate_input, col, path).await?;
         if results.is_empty() {
             Ok(None)
         } else {
@@ -500,20 +510,15 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn find_many(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, req_ctx: Option<teo_runtime::request::Ctx>, path: KeyPath) -> teo_result::Result<Vec<Object>> {
+    async fn find_many(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, req_ctx: Option<teo_runtime::request::Ctx>, path: KeyPath) -> Result<Vec<Object>> {
         let select = finder.get("select");
         let include = finder.get("include");
         let aggregate_input = Aggregation::build(transaction_ctx.namespace(), model, finder)?;
         let reverse = Input::has_negative_take(finder);
         let col = self.get_collection(model);
         // println!("see aggregate input: {:?}", aggregate_input);
-        let cur = col.aggregate(aggregate_input, None).await;
-        if cur.is_err() {
-            return Err(error_ext::unknown_database_find_error(path, format!("{:?}", cur)));
-        }
-        let cur = cur.unwrap();
-        let mut result: Vec<Object> = vec![];
-        let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;
+        let mut result = vec![];
+        let results: Vec<std::result::Result<Document, MongoDBError>> = self.aggregate_to_documents(aggregate_input, col, path.clone()).await?;
         for doc in results {
             let obj = transaction_ctx.new_object(model, action, req_ctx.clone())?;
             match self.clone().document_to_object(transaction_ctx.clone(), &doc.unwrap(), &obj, select, include) {
@@ -532,7 +537,7 @@ impl Transaction for MongoDBTransaction {
         Ok(result)
     }
 
-    async fn count(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_result::Result<Value> {
+    async fn count(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Value> {
         if finder.get("select").is_some() {
             self.count_fields(model, finder, transaction_ctx, path).await
         } else {
@@ -541,7 +546,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn count_objects(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_result::Result<usize> {
+    async fn count_objects(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<usize> {
         let input = Aggregation::build_for_count(transaction_ctx.namespace(), model, finder)?;
         let col = self.get_collection(model);
         let results = self.aggregate_to_documents(input, col, path).await?;
@@ -558,7 +563,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn count_fields(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_result::Result<Value> {
+    async fn count_fields(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Value> {
         let new_finder = Value::Dictionary(finder.as_dictionary().unwrap().iter().map(|(k, v)| {
             if k.as_str() == "select" {
                 ("_count".to_owned(), v.clone())
@@ -570,7 +575,7 @@ impl Transaction for MongoDBTransaction {
         Ok(aggregate_value.get("_count").unwrap().clone())
     }
 
-    async fn aggregate(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_result::Result<Value> {
+    async fn aggregate(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Value> {
         let results = self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?;
         if results.is_empty() {
             // there is no record
@@ -588,7 +593,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn group_by(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_result::Result<Vec<Value>> {
+    async fn group_by(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Vec<Value>> {
         Ok(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?)
     }
 

@@ -47,7 +47,6 @@ impl MongoDBConnection {
 impl Connection for MongoDBConnection {
 
     async fn transaction(&self) -> teo_result::Result<Arc<dyn Transaction>> {
-
         Ok(Arc::new(MongoDBTransaction {
             owned_session: Some(OwnedSession::new(self.client.start_session(None).await.unwrap())),
             database: self.database.clone(),

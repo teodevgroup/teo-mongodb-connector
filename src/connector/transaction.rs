@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use bson::{Bson, doc, Document};
 use futures_util::StreamExt;
 use key_path::{KeyPath, path};
-use mongodb::{Database, Collection, IndexModel};
+use mongodb::{Database, Collection, IndexModel, Client};
 use mongodb::error::{ErrorKind, WriteFailure, Error as MongoDBError};
 use mongodb::options::{FindOneAndUpdateOptions, IndexOptions, ReturnDocument};
 use regex::Regex;
@@ -35,6 +35,7 @@ use crate::migration::index_model::FromIndexModel;
 
 #[derive(Debug, Clone)]
 pub struct MongoDBTransaction {
+    pub(super) client: Client,
     pub(super) database: Database,
 }
 

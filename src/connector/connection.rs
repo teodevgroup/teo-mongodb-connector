@@ -10,6 +10,7 @@ use crate::connector::transaction::MongoDBTransaction;
 
 #[derive(Debug)]
 pub struct MongoDBConnection {
+    client: Client,
     database: Database,
 }
 
@@ -34,6 +35,7 @@ impl MongoDBConnection {
         }
         let database = client.database(&database_name);
         Self {
+            client,
             database,
         }
     }
@@ -44,12 +46,14 @@ impl Connection for MongoDBConnection {
 
     async fn transaction(&self) -> teo_result::Result<Arc<dyn Transaction>> {
         Ok(Arc::new(MongoDBTransaction {
+            client: self.client.clone(),
             database: self.database.clone()
         }))
     }
 
     async fn no_transaction(&self) -> teo_result::Result<Arc<dyn Transaction>> {
         Ok(Arc::new(MongoDBTransaction {
+            client: self.client.clone(),
             database: self.database.clone()
         }))
     }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use async_trait::async_trait;
-use bson::{bson, Bson, doc, Document};
+use bson::{doc, Document};
 use mongodb::{Client, Collection, Database};
 use mongodb::options::ClientOptions;
 use teo_runtime::connection::connection::Connection;
@@ -57,6 +57,10 @@ impl MongoDBConnection {
             return false;
         };
         let collection: Collection<Document> = database.collection("__teo__transaction_test__");
+        // match collection.insert_one_with_session(doc! {"supports": true}, None, &mut session).await {
+        //     Ok(_) => (),
+        //     Err(e) => println!("see this error: {:?}", e),
+        // };
         let result = collection.insert_one_with_session(doc! {"supports": true}, None, &mut session).await.is_ok();
         let Ok(_) = session.commit_transaction().await else {
             return false;

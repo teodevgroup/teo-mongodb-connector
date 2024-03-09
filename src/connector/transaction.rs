@@ -133,17 +133,26 @@ impl MongoDBTransaction {
                                 }
                             }
                             _ => {
-                                error_ext::unknown_database_write_error(path, "")
+                                error_ext::unknown_database_write_error(path, write_error.message.as_str())
                             }
                         }
                     }
+                    WriteFailure::WriteConcernError(write_concern) => {
+                        error_ext::unknown_database_write_error(path, write_concern.message.as_str())
+                    }
                     _ => {
-                        error_ext::unknown_database_write_error(path, "")
+                        error_ext::unknown_database_write_error(path, "unknown write failure")
                     }
                 }
             }
+            ErrorKind::Transaction { message, .. } => {
+                error_ext::unknown_database_write_error(path, message.as_str())
+            }
+            ErrorKind::SessionsNotSupported => {
+                error_ext::unknown_database_write_error(path, "session is not supported")
+            }
             _ => {
-                error_ext::unknown_database_write_error(path, "")
+                error_ext::unknown_database_write_error(path, format!("unknown write: {:?}", error_kind))
             }
         }
     }

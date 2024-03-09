@@ -12,7 +12,7 @@ repository = "https://github.com/teocloud/teo-mongo-connector"
 
 [dependencies]
 teo-result = { version = "0.2.8", path = "../teo-result" }
-teo-teon = { version = "0.2.8", path = "../teo-teon" }
+teo-teon = { version = "0.2.13", path = "../teo-teon" }
 teo-parser = { version = "0.2.13", path = "../teo-parser" }
 teo-runtime = { version = "0.2.13", path = "../teo-runtime" }
 bson = { version = "2.9.0", features = ["chrono-0_4", "serde_with"] }

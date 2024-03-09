@@ -74,7 +74,7 @@ impl Aggregation {
         let mut group = if let Some(by) = by {
             let mut id_for_group_by = doc!{};
             for key in by.as_array().unwrap() {
-                let k = key.as_str().unwrap();
+                let k = key.as_enum_variant().unwrap().value.as_str();
                 let dbk = model.field(k).unwrap().column_name();
                 id_for_group_by.insert(dbk, doc!{
                 "$cond": [{"$ifNull": [format!("${dbk}"), false]}, format!("${dbk}"), null]
@@ -88,7 +88,7 @@ impl Aggregation {
         let mut unset: Vec<String> = vec![];
         if let Some(by) = by {
             for key in by.as_array().unwrap() {
-                let k = key.as_str().unwrap();
+                let k = key.as_enum_variant().unwrap().value.as_str();
                 let dbk = model.field(k).unwrap().column_name();
                 set.insert(k, format!("$_id.{dbk}"));
             }
@@ -136,7 +136,7 @@ impl Aggregation {
         if let Some(by) = by {
             // we need to order these
             for key in by.as_array().unwrap() {
-                let k = key.as_str().unwrap();
+                let k = key.as_enum_variant().unwrap().value.as_str();
                 group_by_sort.insert(k, 1);
             }
         }

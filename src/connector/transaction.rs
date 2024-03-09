@@ -1,12 +1,12 @@
 use std::fmt::{Debug};
 use std::ops::Neg;
 use std::sync::Arc;
-use std::sync::atomic::{Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use bson::{Bson, doc, Document};
 use futures_util::StreamExt;
 use key_path::{KeyPath, path};
-use mongodb::{Database, Collection, IndexModel, Client};
+use mongodb::{Database, Collection, IndexModel, Client, ClientSession};
 use mongodb::error::{ErrorKind, WriteFailure, Error as MongoDBError};
 use mongodb::options::{FindOneAndUpdateOptions, IndexOptions, ReturnDocument};
 use regex::Regex;
@@ -36,17 +36,29 @@ use crate::migration::index_model::FromIndexModel;
 
 #[derive(Debug, Clone)]
 pub struct MongoDBTransaction {
-    pub(super) owned_session: Option<OwnedSession>,
     pub(super) database: Database,
+    pub(super) owned_session: Option<OwnedSession>,
+    pub committed: Arc<AtomicBool>,
 }
 
 impl MongoDBTransaction {
+
+    pub(crate) fn session(&self) -> Option<&mut ClientSession> {
+        if self.committed.load(Ordering::SeqCst) {
+            None
+        } else {
+            match &self.owned_session {
+                None => None,
+                Some(s) => Some(s.client_session()),
+            }
+        }
+    }
 
     pub(crate) fn get_collection(&self, model: &Model) -> Collection<Document> {
         self.database.collection(model.table_name())
     }
 
-    fn document_to_object(&self, transaction_ctx: transaction::Ctx, document: &Document, object: &Object, select: Option<&Value>, include: Option<&Value>) -> teo_result::Result<()> {
+    fn document_to_object(&self, transaction_ctx: Ctx, document: &Document, object: &Object, select: Option<&Value>, include: Option<&Value>) -> Result<()> {
         for key in document.keys() {
             let object_field = object.model().fields().iter().find(|f| f.column_name() == key).map(|f| *f);
             if object_field.is_some() {
@@ -137,15 +149,40 @@ impl MongoDBTransaction {
         }
     }
 
-    async fn aggregate_or_group_by(&self, namespace: &Namespace, model: &Model, finder: &Value, path: KeyPath) -> teo_result::Result<Vec<Value>> {
+    async fn aggregate_to_documents(&self, aggregate_input: Vec<Document>, col: Collection<Document>, path: KeyPath) -> Result<Vec<std::result::Result<Document, MongoDBError>>> {
+        match self.session() {
+            Some(session) => {
+                let cur = col.aggregate_with_session(aggregate_input, None, session).await;
+                if cur.is_err() {
+                    return Err(error_ext::unknown_database_find_error(path, format!("{:?}", cur)));
+                }
+                let mut cur = cur.unwrap();
+                let mut results: Vec<std::result::Result<Document, MongoDBError>> = vec![];
+                loop {
+                    if let Some(item) = cur.next(session).await {
+                        results.push(item);
+                    } else {
+                        break;
+                    }
+                }
+                Ok(results)
+            },
+            None => {
+                let cur = col.aggregate(aggregate_input, None).await;
+                if cur.is_err() {
+                    return Err(error_ext::unknown_database_find_error(path, format!("{:?}", cur)));
+                }
+                let cur = cur.unwrap();
+                let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;
+                Ok(results)
+            },
+        }
+    }
+
+    async fn aggregate_or_group_by(&self, namespace: &Namespace, model: &Model, finder: &Value, path: KeyPath) -> Result<Vec<Value>> {
         let aggregate_input = Aggregation::build_for_aggregate(namespace, model, finder)?;
         let col = self.get_collection(model);
-        let cur = col.aggregate(aggregate_input, None).await;
-        if cur.is_err() {
-            return Err(error_ext::unknown_database_find_error(path, format!("{:?}", cur)));
-        }
-        let cur = cur.unwrap();
-        let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;
+        let results = self.aggregate_to_documents(aggregate_input, col, path).await?;
         let mut final_retval: Vec<Value> = vec![];
         for result in results.iter() {
             // there are records

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use async_trait::async_trait;
 use bson::doc;
 use mongodb::{Client, Database};
@@ -49,14 +50,16 @@ impl Connection for MongoDBConnection {
 
         Ok(Arc::new(MongoDBTransaction {
             owned_session: Some(OwnedSession::new(self.client.start_session(None).await.unwrap())),
-            database: self.database.clone()
+            database: self.database.clone(),
+            committed: Arc::new(AtomicBool::new(false)),
         }))
     }
 
     async fn no_transaction(&self) -> teo_result::Result<Arc<dyn Transaction>> {
         Ok(Arc::new(MongoDBTransaction {
             owned_session: None,
-            database: self.database.clone()
+            database: self.database.clone(),
+            committed: Arc::new(AtomicBool::new(false)),
         }))
     }
 }

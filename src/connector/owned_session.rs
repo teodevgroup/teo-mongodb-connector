@@ -24,6 +24,9 @@ impl Drop for OwnedSessionInner {
     }
 }
 
+unsafe impl Send for OwnedSessionInner { }
+unsafe impl Sync for OwnedSessionInner { }
+
 #[derive(Clone, Debug)]
 pub struct OwnedSession {
     inner: Arc<OwnedSessionInner>,

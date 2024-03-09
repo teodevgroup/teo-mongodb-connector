@@ -544,12 +544,7 @@ impl Transaction for MongoDBTransaction {
     async fn count_objects(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> teo_result::Result<usize> {
         let input = Aggregation::build_for_count(transaction_ctx.namespace(), model, finder)?;
         let col = self.get_collection(model);
-        let cur = col.aggregate(input, None).await;
-        if cur.is_err() {
-            return Err(error_ext::unknown_database_find_error(path, format!("{:?}", cur)));
-        }
-        let cur = cur.unwrap();
-        let results: Vec<std::result::Result<Document, MongoDBError>> = cur.collect().await;
+        let results = self.aggregate_to_documents(input, col, path).await?;
         if results.is_empty() {
             Ok(0)
         } else {
@@ -598,19 +593,27 @@ impl Transaction for MongoDBTransaction {
     }
 
     fn is_committed(&self) -> bool {
-        false
+        self.committed.load(Ordering::SeqCst)
     }
 
     fn is_transaction(&self) -> bool {
-        false
+        self.owned_session.is_some()
     }
 
     async fn commit(&self) -> Result<()> {
-        Ok(())
+        if let Some(session) = &self.owned_session {
+            session.commit_transaction().await
+        } else {
+            Ok(())
+        }
     }
 
     async fn abort(&self) -> Result<()> {
-        Ok(())
+        if let Some(session) = &self.owned_session {
+            session.abort_transaction().await
+        } else {
+            Ok(())
+        }
     }
 
     async fn spawn(&self) -> Result<Arc<dyn Transaction>> {

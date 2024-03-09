@@ -5,6 +5,7 @@ use mongodb::{Client, Database};
 use mongodb::options::ClientOptions;
 use teo_runtime::connection::connection::Connection;
 use teo_runtime::connection::transaction::Transaction;
+use crate::connector::OwnedSession;
 use crate::connector::transaction::MongoDBTransaction;
 
 
@@ -45,15 +46,16 @@ impl MongoDBConnection {
 impl Connection for MongoDBConnection {
 
     async fn transaction(&self) -> teo_result::Result<Arc<dyn Transaction>> {
+
         Ok(Arc::new(MongoDBTransaction {
-            client: self.client.clone(),
+            owned_session: Some(OwnedSession::new(self.client.start_session(None).await.unwrap())),
             database: self.database.clone()
         }))
     }
 
     async fn no_transaction(&self) -> teo_result::Result<Arc<dyn Transaction>> {
         Ok(Arc::new(MongoDBTransaction {
-            client: self.client.clone(),
+            owned_session: None,
             database: self.database.clone()
         }))
     }

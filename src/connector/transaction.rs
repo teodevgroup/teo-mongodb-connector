@@ -31,11 +31,12 @@ use teo_runtime::object::error_ext;
 use teo_runtime::utils::ContainsStr;
 use teo_teon::teon;
 use crate::bson_ext::teon_value_to_bson;
+use crate::connector::OwnedSession;
 use crate::migration::index_model::FromIndexModel;
 
 #[derive(Debug, Clone)]
 pub struct MongoDBTransaction {
-    pub(super) client: Client,
+    pub(super) owned_session: Option<OwnedSession>,
     pub(super) database: Database,
 }
 

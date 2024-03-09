@@ -57,7 +57,7 @@ impl MongoDBConnection {
             return false;
         };
         let collection: Collection<Document> = database.collection("__teo__transaction_test__");
-        let result = collection.insert_one(doc! {"supports": true}, None).await.is_ok();
+        let result = collection.insert_one_with_session(doc! {"supports": true}, None, &mut session).await.is_ok();
         let Ok(_) = session.commit_transaction().await else {
             return false;
         };

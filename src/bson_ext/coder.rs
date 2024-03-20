@@ -4,11 +4,11 @@ use key_path::KeyPath;
 use teo_result::{Error, Result};
 use teo_parser::r#type::Type;
 use teo_runtime::traits::named::Named;
-use teo_teon::Value;
+use teo_runtime::Value;
 use teo_runtime::model::Model;
 use teo_runtime::namespace::Namespace;
 use teo_runtime::utils::ContainsStr;
-use teo_runtime::object::error_ext;
+use teo_runtime::error_ext;
 use crate::bson_ext::teon_value_to_bson;
 
 pub(crate) struct BsonCoder { }

@@ -1,7 +1,7 @@
 use bson::Bson;
 use bson::datetime::{DateTime as BsonDateTime};
 use chrono::{NaiveDateTime, NaiveTime, TimeZone, Utc};
-use teo_teon::Value;
+use teo_runtime::Value;
 
 pub(crate) mod coder;
 
@@ -20,7 +20,6 @@ pub(crate) fn teon_value_to_bson(value: &Value) -> Bson {
         Value::DateTime(val) => Bson::DateTime(BsonDateTime::from(*val)),
         Value::Array(val) => Bson::Array(val.iter().map(|i| { teon_value_to_bson(i) }).collect()),
         Value::Dictionary(val) => Bson::Document(val.iter().map(|(k, v)| (k.clone(), teon_value_to_bson(v))).collect()),
-        Value::EnumVariant(val) => Bson::String(val.value.clone()),
         _ => panic!("Cannot convert to Bson value.")
     }
 }

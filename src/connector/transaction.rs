@@ -606,6 +606,10 @@ impl Transaction for MongoDBTransaction {
         Ok(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?)
     }
 
+    async fn sql(&self, model: &'static Model, sql: &str, transaction_ctx: Ctx) -> Result<Value> {
+        Err(Error::new("do not run raw sql on MongoDB database"))
+    }
+
     fn is_committed(&self) -> bool {
         self.committed.load(Ordering::SeqCst)
     }

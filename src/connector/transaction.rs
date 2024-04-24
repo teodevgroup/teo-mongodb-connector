@@ -606,7 +606,7 @@ impl Transaction for MongoDBTransaction {
         Ok(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?)
     }
 
-    async fn sql(&self, model: &'static Model, sql: &str, transaction_ctx: Ctx) -> Result<Value> {
+    async fn sql(&self, model: &'static Model, sql: &str, transaction_ctx: Ctx) -> Result<Vec<Value>> {
         Err(Error::new("do not run raw sql on MongoDB database"))
     }
 

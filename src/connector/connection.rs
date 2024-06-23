@@ -9,7 +9,6 @@ use teo_runtime::connection::transaction::Transaction;
 use crate::connector::OwnedSession;
 use crate::connector::transaction::MongoDBTransaction;
 
-
 #[derive(Debug)]
 pub struct MongoDBConnection {
     client: Client,

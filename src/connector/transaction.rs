@@ -14,7 +14,7 @@ use crate::aggregation::Aggregation;
 use crate::bson_ext::coder::BsonCoder;
 use teo_runtime::action::action::*;
 use teo_runtime::model::object::Object;
-use teo_runtime::index::Type;
+use teo_runtime::model::index::Type;
 use teo_runtime::model::{Index, Model};
 use teo_runtime::value::Value;
 use teo_result::{Error, Result};
@@ -59,11 +59,11 @@ impl MongoDBTransaction {
 
     fn document_to_object(&self, transaction_ctx: Ctx, document: &Document, object: &Object, select: Option<&Value>, include: Option<&Value>) -> Result<()> {
         for key in document.keys() {
-            let object_field = object.model().fields().iter().find(|f| f.column_name() == key).map(|f| *f);
+            let object_field = object.model().fields().values().find(|f| f.column_name() == key);
             if object_field.is_some() {
                 // field
                 let object_field = object_field.unwrap();
-                let object_key = &object_field.name;
+                let object_key = object_field.name();
                 let r#type = object_field.r#type();
                 let bson_value = document.get(key).unwrap();
                 let value_result = BsonCoder::decode(transaction_ctx.namespace(), object.model(), r#type, object_field.is_optional(), bson_value, path![]);
@@ -101,7 +101,7 @@ impl MongoDBTransaction {
                 let object_bsons = document.get(key).unwrap().as_array().unwrap();
                 let mut related: Vec<Object> = vec![];
                 for related_object_bson in object_bsons {
-                    let action = NESTED | FIND | (if relation.is_vec { MANY } else { SINGLE });
+                    let action = NESTED | FIND | (if relation.is_vec() { MANY } else { SINGLE });
                     let related_object = transaction_ctx.new_object(relation_model, action, object.request_ctx())?;
                     self.clone().document_to_object(transaction_ctx.clone(), related_object_bson.as_document().unwrap(), &related_object, inner_select, inner_include)?;
                     related.push(related_object);
@@ -235,7 +235,7 @@ impl MongoDBTransaction {
         let model = object.model();
         let keys = object.keys_for_save();
         let col = self.get_collection(model);
-        let auto_keys = &model.cache.auto_keys;
+        let auto_keys = &model.cache().auto_keys;
         // create
         let mut doc = doc!{};
         for key in keys {
@@ -398,7 +398,7 @@ impl Transaction for MongoDBTransaction {
                         continue
                     }
                     let name = (&index).options.as_ref().unwrap().name.as_ref().unwrap();
-                    let result = model.indexes().iter().find(|i| name == i.name()).map(|i| *i);
+                    let result = model.indexes().values().find(|i| name == i.name());
                     if result.is_none() {
                         // not in our model definition, but in the database
                         // drop this index
@@ -429,7 +429,7 @@ impl Transaction for MongoDBTransaction {
                     reviewed_names.push(name.clone());
                 }
             }
-            for index in model.indexes() {
+            for (_, index) in model.indexes() {
                 if !reviewed_names.contains_str(index.name()) {
                     // ignore primary
                     if index.keys().len() == 1 {

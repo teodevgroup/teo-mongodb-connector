@@ -1,7 +1,7 @@
 use mongodb::IndexModel;
 use teo_runtime::sort::Sort;
 use teo_runtime::model::{Index, index::Item};
-use teo_runtime::index::Type;
+use teo_runtime::model::index::Type;
 
 pub trait FromIndexModel {
     fn from_index_model(index_model: &IndexModel) -> Self;

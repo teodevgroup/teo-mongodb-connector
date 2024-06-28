@@ -300,14 +300,14 @@ impl Aggregation {
         let primary_field_names = model.primary_index().unwrap().keys();
         let mut keys: HashSet<String> = HashSet::new();
         let save_unmentioned_keys = true_keys.is_empty();
-        model.cache.all_keys.iter().for_each(|k| {
+        model.cache().all_keys.iter().for_each(|k| {
             let save = primary_field_names.contains(k) || (!false_keys.contains(&k.as_str()) && (true_keys.contains(&k.as_str()) || save_unmentioned_keys));
             if save {
                 if let Some(field) = model.field(k) {
                     let column_name = field.column_name();
                     keys.insert(column_name.to_string());
                 } else if let Some(property) = model.property(k) {
-                    for d in &property.dependencies {
+                    for d in property.dependencies() {
                         let column_name = model.field(d).unwrap().name();
                         keys.insert(column_name.to_string());
                     }
@@ -760,7 +760,7 @@ impl Aggregation {
 
     fn default_desc_order(model: &Model) -> Value {
         let mut vec: Vec<Value> = vec![];
-        for item in &model.primary_index().unwrap().items {
+        for item in model.primary_index().unwrap().items() {
             vec.push(Value::Dictionary(indexmap!{item.field.clone() => Value::String("desc".to_string())}));
         }
         Value::Array(vec)

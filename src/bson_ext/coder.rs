@@ -80,7 +80,7 @@ impl BsonCoder {
             }
             Type::EnumVariant(reference) => match bson_value.as_str() {
                 Some(val) => {
-                    let e = namespace.enum_at_path(&reference.str_path()).unwrap();
+                    let e = namespace.enum_at_path(reference.string_path()).unwrap();
                     if e.member_names().contains_str(val) {
                         Ok(Value::String(val.to_owned()))
                     } else {

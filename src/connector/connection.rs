@@ -18,7 +18,7 @@ pub struct MongoDBConnection {
 
 impl MongoDBConnection {
 
-    pub async fn new(url: &str) -> Self {
+    pub async fn new<P>(url: &str, print: P) -> Self where P: Fn(&str) {
         let options = match ClientOptions::parse(url).await {
             Ok(options) => options,
             Err(_) => panic!("MongoDB url is invalid.")
@@ -39,7 +39,7 @@ impl MongoDBConnection {
         let database = client.database(&database_name);
         let supports_transaction = Self::test_transaction_support(&client, &database).await;
         if !supports_transaction {
-            println!("warning: MongoDB transaction is not supported in this setup.");
+            print("warning: MongoDB transaction is not supported in this setup.");
         }
         Self {
             client,

@@ -27,6 +27,7 @@ use teo_runtime::sort::Sort;
 use teo_runtime::model::object::input::Input;
 use teo_runtime::namespace::Namespace;
 use teo_runtime::error_ext;
+use teo_runtime::request::Request;
 use teo_runtime::utils::ContainsStr;
 use teo_runtime::teon;
 use crate::bson_ext::teon_value_to_bson;
@@ -102,7 +103,7 @@ impl MongoDBTransaction {
                 let mut related: Vec<Object> = vec![];
                 for related_object_bson in object_bsons {
                     let action = NESTED | FIND | (if relation.is_vec() { MANY } else { SINGLE });
-                    let related_object = transaction_ctx.new_object(relation_model, action, object.request_ctx())?;
+                    let related_object = transaction_ctx.new_object(relation_model, action, object.request())?;
                     self.clone().document_to_object(transaction_ctx.clone(), related_object_bson.as_document().unwrap(), &related_object, inner_select, inner_include)?;
                     related.push(related_object);
                 }
@@ -501,7 +502,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn find_unique(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, req_ctx: Option<teo_runtime::request::Ctx>, path: KeyPath) -> Result<Option<Object>> {
+    async fn find_unique(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, request: Option<Request>, path: KeyPath) -> Result<Option<Object>> {
         let select = finder.get("select");
         let include = finder.get("include");
         let aggregate_input = Aggregation::build(transaction_ctx.namespace(), model, finder)?;
@@ -511,7 +512,7 @@ impl Transaction for MongoDBTransaction {
             Ok(None)
         } else {
             for doc in results {
-                let obj = transaction_ctx.new_object(model, action, req_ctx)?;
+                let obj = transaction_ctx.new_object(model, action, request)?;
                 self.clone().document_to_object(transaction_ctx, &doc.unwrap(), &obj, select, include)?;
                 return Ok(Some(obj));
             }
@@ -519,7 +520,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn find_many(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, req_ctx: Option<teo_runtime::request::Ctx>, path: KeyPath) -> Result<Vec<Object>> {
+    async fn find_many(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, request: Option<Request>, path: KeyPath) -> Result<Vec<Object>> {
         let select = finder.get("select");
         let include = finder.get("include");
         let aggregate_input = Aggregation::build(transaction_ctx.namespace(), model, finder)?;
@@ -529,7 +530,7 @@ impl Transaction for MongoDBTransaction {
         let mut result = vec![];
         let results: Vec<std::result::Result<Document, MongoDBError>> = self.aggregate_to_documents(aggregate_input, col, path.clone()).await?;
         for doc in results {
-            let obj = transaction_ctx.new_object(model, action, req_ctx.clone())?;
+            let obj = transaction_ctx.new_object(model, action, request.clone())?;
             match self.clone().document_to_object(transaction_ctx.clone(), &doc.unwrap(), &obj, select, include) {
                 Ok(_) => {
                     if reverse {

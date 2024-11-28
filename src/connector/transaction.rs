@@ -502,7 +502,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn find_unique(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, request: Option<Request>, path: KeyPath) -> Result<Option<Object>> {
+    async fn find_unique(&self, model: &Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, request: Option<Request>, path: KeyPath) -> Result<Option<Object>> {
         let select = finder.get("select");
         let include = finder.get("include");
         let aggregate_input = Aggregation::build(transaction_ctx.namespace(), model, finder)?;
@@ -520,7 +520,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn find_many(&self, model: &'static Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, request: Option<Request>, path: KeyPath) -> Result<Vec<Object>> {
+    async fn find_many(&self, model: &Model, finder: &Value, ignore_select_and_include: bool, action: Action, transaction_ctx: Ctx, request: Option<Request>, path: KeyPath) -> Result<Vec<Object>> {
         let select = finder.get("select");
         let include = finder.get("include");
         let aggregate_input = Aggregation::build(transaction_ctx.namespace(), model, finder)?;
@@ -547,7 +547,7 @@ impl Transaction for MongoDBTransaction {
         Ok(result)
     }
 
-    async fn count(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Value> {
+    async fn count(&self, model: &Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Value> {
         if finder.get("select").is_some() {
             self.count_fields(model, finder, transaction_ctx, path).await
         } else {
@@ -556,7 +556,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn count_objects(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<usize> {
+    async fn count_objects(&self, model: &Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<usize> {
         let input = Aggregation::build_for_count(transaction_ctx.namespace(), model, finder)?;
         let col = self.get_collection(model);
         let results = self.aggregate_to_documents(input, col, path).await?;
@@ -573,7 +573,7 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn count_fields(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Value> {
+    async fn count_fields(&self, model: &Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Value> {
         let new_finder = Value::Dictionary(finder.as_dictionary().unwrap().iter().map(|(k, v)| {
             if k.as_str() == "select" {
                 ("_count".to_owned(), v.clone())
@@ -585,7 +585,7 @@ impl Transaction for MongoDBTransaction {
         Ok(aggregate_value.get("_count").unwrap().clone())
     }
 
-    async fn aggregate(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Value> {
+    async fn aggregate(&self, model: &Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Value> {
         let results = self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?;
         if results.is_empty() {
             // there is no record
@@ -603,11 +603,11 @@ impl Transaction for MongoDBTransaction {
         }
     }
 
-    async fn group_by(&self, model: &'static Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Vec<Value>> {
+    async fn group_by(&self, model: &Model, finder: &Value, transaction_ctx: Ctx, path: KeyPath) -> Result<Vec<Value>> {
         Ok(self.aggregate_or_group_by(transaction_ctx.namespace(), model, finder, path).await?)
     }
 
-    async fn sql(&self, model: &'static Model, sql: &str, transaction_ctx: Ctx) -> Result<Vec<Value>> {
+    async fn sql(&self, model: &Model, sql: &str, transaction_ctx: Ctx) -> Result<Vec<Value>> {
         Err(Error::new("do not run raw sql on MongoDB database"))
     }
 
